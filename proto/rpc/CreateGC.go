@@ -1,0 +1,26 @@
+package rpc
+
+import (
+	"github.com/X11Libre/go-x11proto/proto/base"
+	"github.com/X11Libre/go-x11proto/proto/core"
+	"github.com/X11Libre/go-x11proto/proto/core/request"
+)
+
+func CreateGC1(c *core.X11Conn, fg base.CARD32, bg base.CARD32, font base.FONT) (base.GC, error) {
+	gcid := base.GC(c.NextResourceID())
+	req := request.CreateGCRequest{
+		Gcid:       gcid,
+		Drawable:   c.Setup.Screens[0].RootWindow.Drawable(),
+		ValueMask:  request.GC_MASK_FOREGROUND | request.GC_MASK_BACKGROUND,
+		Foreground: fg,
+		Background: bg,
+		Font:       font,
+	}
+
+	if font != 0 {
+		req.ValueMask = req.ValueMask | request.GC_MASK_FONT
+	}
+
+	_, err := c.Send(&req)
+	return req.Gcid, err
+}
