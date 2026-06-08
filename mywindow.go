@@ -89,11 +89,11 @@ func (w *MyWindow) HandleWindowEvent(ev events.Event) bool {
 			"hello foo bar",
 		)
 	case *events.KeyPressEvent:
-//		log.Printf("KeyPressEvent: %+v\n", ev)
+		//		log.Printf("KeyPressEvent: %+v\n", ev)
 	case *events.KeyReleaseEvent:
-//		log.Printf("KeyPressEvent: %+v\n", ev)
+		//		log.Printf("KeyPressEvent: %+v\n", ev)
 	default:
-//		log.Printf("MyWindow::HandleWindowEvent: %T %+v\n", ev, ev)
+		//		log.Printf("MyWindow::HandleWindowEvent: %T %+v\n", ev, ev)
 	}
 	return true
 }

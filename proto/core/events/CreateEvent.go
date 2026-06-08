@@ -6,15 +6,14 @@ import (
 
 type CreateEvent struct {
 	GenericEvent
-	ParentWindow base.WINDOW
-	TargetWindow base.WINDOW
-	X base.INT16
-	Y base.INT16
-	Width base.CARD16
-	Height base.CARD16
-	BorderWidth base.CARD16
+	ParentWindow     base.WINDOW
+	TargetWindow     base.WINDOW
+	X                base.INT16
+	Y                base.INT16
+	Width            base.CARD16
+	Height           base.CARD16
+	BorderWidth      base.CARD16
 	OverrideRedirect bool
-
 }
 
 func (e *CreateEvent) ReceiverWindow() base.WINDOW {
