@@ -1,0 +1,29 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils
+
+      - name: Start Xvfb
+        run: Xvfb :99 -screen 0 1024x768x24 & sleep 1
+
+      - name: Build
+        run: go build ./...
+        env:
+          DISPLAY: ":99"
+
+      - name: Test
+        run: make test
+        env:
+          DISPLAY: ":99"
