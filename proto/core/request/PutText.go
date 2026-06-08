@@ -26,7 +26,7 @@ func (r *PutText8Request) WriteInto(writer *base.RequestWriter) error {
 		return fmt.Errorf("PutText8Request: text too long\n")
 	}
 
-	writer.SetOpcode(opcode.PutText8)
+	writer.SetOpcode(opcode.PolyText8)
 	writer.SetParam0(base.CARD8(l))
 	writer.WriteXID(base.XID(r.Drawable))
 	writer.WriteXID(base.XID(r.Gc))
