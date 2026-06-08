@@ -17,8 +17,7 @@ type WindowHandler interface {
 }
 
 type Window struct {
-	Conn      *TkConn
-	XID       base.WINDOW
+	Drawable
 	ParentXID base.WINDOW
 	Parent    *Window
 	Name      string
@@ -53,6 +52,9 @@ func (w *Window) Create() error {
 		return err
 	}
 
+	w.Drawable.Conn = w.Conn
+	w.Drawable.XID = xid
+
 	w.Conn.X11Conn.RegisterWindowHandler(w.XID, w)
 
 	if w.Name != "" {
@@ -84,21 +86,4 @@ func (w Window) SetName(n string) error {
 
 func (w Window) DRAWABLE() base.DRAWABLE {
 	return w.XID
-}
-
-func (w Window) FillRect(gc base.GC, x base.INT16, y base.INT16, width base.CARD16, height base.CARD16) error {
-	return w.FillRects(
-		gc,
-		[]base.Rectangle{
-			{X: x, Y: y, Width: width, Height: height},
-		},
-	)
-}
-
-func (w Window) FillRects(gc base.GC, rects []base.Rectangle) error {
-	return rpc.FillRects(w.Conn.X11Conn, w.DRAWABLE(), gc, rects)
-}
-
-func (w Window) PutText8(gc base.GC, x base.INT16, y base.INT16, text string) error {
-	return rpc.PutText8(w.Conn.X11Conn, w.DRAWABLE(), gc, x, y, text)
 }

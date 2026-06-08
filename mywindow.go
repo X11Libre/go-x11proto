@@ -24,8 +24,10 @@ func (w *MyWindow) Init() {
 
 	w.Win2 = ChildWindow{
 		Window: tk_core.Window{
+			Drawable: tk_core.Drawable{
+				Conn: w.Window.Conn,
+			},
 			Parent:    &w.Window,
-			Conn:      w.Window.Conn,
 			Name:      "HELLO WORLD EXAMPLE",
 			X:         100,
 			Y:         100,
@@ -38,8 +40,10 @@ func (w *MyWindow) Init() {
 
 	w.Button = tk_widget.Button{
 		Window: tk_core.Window{
+			Drawable: tk_core.Drawable{
+				Conn: w.Window.Conn,
+			},
 			Parent:    &w.Window,
-			Conn:      w.Window.Conn,
 			Name:      "button test",
 			X:         100,
 			Y:         300,

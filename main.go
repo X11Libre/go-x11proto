@@ -29,8 +29,10 @@ func main() {
 
 	win := MyWindow{
 		Window: tk_core.Window{
+			Drawable: tk_core.Drawable{
+				Conn: &tkConn,
+			},
 			Parent:    tkConn.GetRoot(),
-			Conn:      &tkConn,
 			Name:      "HELLO WORLD EXAMPLE",
 			X:         50,
 			Y:         50,
