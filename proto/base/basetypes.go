@@ -19,6 +19,7 @@ func (x XID) Invalid() bool {
 
 type DRAWABLE = XID
 type WINDOW = DRAWABLE
+type PIXMAP = DRAWABLE
 type COLORMAP = XID
 type VISUAL = XID
 type FONT = XID
