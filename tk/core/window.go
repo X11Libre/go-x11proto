@@ -83,7 +83,3 @@ func (w Window) SetName(n string) error {
 	w.Name = n
 	return rpc.SetWindowName(w.Conn.X11Conn, w.XID, n)
 }
-
-func (w Window) DRAWABLE() base.DRAWABLE {
-	return w.XID
-}
