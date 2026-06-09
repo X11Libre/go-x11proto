@@ -69,7 +69,7 @@ func NewConn(display_name string, be bool) (*X11Conn, error) {
 			"STRING":  atoms.STRING,
 			"WM_NAME": atoms.WM_NAME,
 		},
-		nextID: 1, // FIXME
+		nextID: 0,
 	}
 
 	if err := c.handshake(); err != nil {
@@ -328,7 +328,7 @@ func (c *X11Conn) removePending(seq base.CARD16) {
 func (c *X11Conn) NextResourceID() base.XID {
 	id := c.nextID
 	c.nextID += 1
-	id = (c.Setup.RidBase | id)
+	id = (c.Setup.RidBase | (id & c.Setup.RidMask))
 	return base.XID(id)
 }
 
