@@ -1,18 +1,24 @@
 package main
 
 import (
+	_ "embed"
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
 	"github.com/X11Libre/go-x11proto/proto/rpc"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	tk_widget "github.com/X11Libre/go-x11proto/tk/widget"
+	"github.com/X11Libre/go-x11proto/tk/xpm"
 	"log"
 )
+
+//go:embed tk/xpm/xlogo.xpm
+var xlogoXPM []byte
 
 type MyWindow struct {
 	tk_core.Window
 	Gc_black base.GC
 	font     base.FONT
+	bgPixmap base.PIXMAP
 	Win2     ChildWindow
 	Button   tk_widget.Button
 }
@@ -20,6 +26,16 @@ type MyWindow struct {
 func (w *MyWindow) Init() {
 	w.Window.SetWindowHandler(w)
 	w.Window.Create()
+
+	// Upload background pixmap before mapping so it's visible immediately.
+	conn := w.Window.Conn.X11Conn
+	if img, err := xpm.DecodeBytes(xlogoXPM); err == nil {
+		if pixmap, err := img.Upload(conn, conn.DefaultRoot()); err == nil {
+			rpc.SetWindowBackgroundPixmap(conn, w.Window.XID, pixmap)
+			w.bgPixmap = pixmap
+		}
+	}
+
 	w.Window.Map()
 
 	w.Win2 = ChildWindow{
