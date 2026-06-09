@@ -18,8 +18,8 @@ func (e *MapEvent) ReceiverWindow() base.WINDOW {
 
 func (e *MapEvent) Parse(rbuf base.ReadBuffer) error {
 	e.Serial = rbuf.CARD32()
-	e.EventWindow = rbuf.WINDOW()
-	e.MappedWindow = rbuf.WINDOW()
+	e.EventWindow = rbuf.XID()
+	e.MappedWindow = rbuf.XID()
 	e.OverrideRedirect = rbuf.Bool()
 	return rbuf.LastError
 }

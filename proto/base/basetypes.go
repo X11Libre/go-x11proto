@@ -12,16 +12,12 @@ type BOOL CARD8
 
 type ATOM CARD32
 type XID CARD32
-type DRAWABLE XID
-type WINDOW DRAWABLE
-type COLORMAP XID
-type VISUAL XID
-type FONT XID
-type GC XID
-
-func (w WINDOW) Drawable() DRAWABLE {
-	return DRAWABLE(w)
-}
+type DRAWABLE = XID
+type WINDOW = DRAWABLE
+type COLORMAP = XID
+type VISUAL = XID
+type FONT = XID
+type GC = XID
 
 func bool2BOOL(b bool) BOOL {
 	if b {

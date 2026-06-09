@@ -83,7 +83,7 @@ func (w Window) SetName(n string) error {
 }
 
 func (w Window) DRAWABLE() base.DRAWABLE {
-	return w.XID.Drawable()
+	return w.XID
 }
 
 func (w Window) FillRect(gc base.GC, x base.INT16, y base.INT16, width base.CARD16, height base.CARD16) error {

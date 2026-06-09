@@ -21,8 +21,8 @@ func (e *CreateEvent) ReceiverWindow() base.WINDOW {
 }
 
 func (e *CreateEvent) Parse(rbuf base.ReadBuffer) error {
-	e.ParentWindow = rbuf.WINDOW()
-	e.TargetWindow = rbuf.WINDOW()
+	e.ParentWindow = rbuf.XID()
+	e.TargetWindow = rbuf.XID()
 	e.X = rbuf.INT16()
 	e.Y = rbuf.INT16()
 	e.Width = rbuf.CARD16()

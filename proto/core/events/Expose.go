@@ -18,7 +18,7 @@ func (ev *ExposeEvent) ReceiverWindow() base.WINDOW {
 }
 
 func (ev *ExposeEvent) Parse(rbuf base.ReadBuffer) error {
-	ev.Window = rbuf.WINDOW()
+	ev.Window = rbuf.XID()
 	ev.X = rbuf.CARD16()
 	ev.Y = rbuf.CARD16()
 	ev.Width = rbuf.CARD16()

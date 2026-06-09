@@ -17,7 +17,7 @@ func (e *FocusEvent) ReceiverWindow() base.WINDOW {
 
 func (e *FocusEvent) Parse(rbuf base.ReadBuffer) error {
 	e.Reason = e.GenericEvent.Detail
-	e.Window = rbuf.WINDOW()
+	e.Window = rbuf.XID()
 	e.Mode = rbuf.CARD8()
 	return rbuf.LastError
 }

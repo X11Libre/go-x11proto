@@ -15,7 +15,7 @@ func (e *VisibilityEvent) ReceiverWindow() base.WINDOW {
 }
 
 func (e *VisibilityEvent) Parse(rbuf base.ReadBuffer) error {
-	e.Window = rbuf.WINDOW()
+	e.Window = rbuf.XID()
 	e.State = rbuf.CARD8()
 	return rbuf.LastError
 }

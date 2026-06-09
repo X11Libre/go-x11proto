@@ -10,7 +10,7 @@ func CreateGC1(c *core.X11Conn, fg base.CARD32, bg base.CARD32, font base.FONT) 
 	gcid := base.GC(c.NextResourceID())
 	req := request.CreateGCRequest{
 		Gcid:       gcid,
-		Drawable:   c.Setup.Screens[0].RootWindow.Drawable(),
+		Drawable:   c.Setup.Screens[0].RootWindow,
 		ValueMask:  request.GC_MASK_FOREGROUND | request.GC_MASK_BACKGROUND,
 		Foreground: fg,
 		Background: bg,

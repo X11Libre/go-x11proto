@@ -27,9 +27,9 @@ func (e *CrossingEvent) ReceiverWindow() base.WINDOW {
 func (e *CrossingEvent) Parse(rbuf base.ReadBuffer) error {
 	e.Type = e.GenericEvent.Detail
 	e.Timestamp = rbuf.CARD32()
-	e.RootWindow = rbuf.WINDOW()
-	e.EventWindow = rbuf.WINDOW()
-	e.ChildWindow = rbuf.WINDOW()
+	e.RootWindow = rbuf.XID()
+	e.EventWindow = rbuf.XID()
+	e.ChildWindow = rbuf.XID()
 	e.RootX = rbuf.CARD16()
 	e.RootY = rbuf.CARD16()
 	e.EventX = rbuf.CARD16()

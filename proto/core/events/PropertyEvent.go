@@ -17,8 +17,8 @@ func (e *PropertyEvent) ReceiverWindow() base.WINDOW {
 }
 
 func (e *PropertyEvent) Parse(rbuf base.ReadBuffer) error {
-	e.Window = rbuf.WINDOW()
-	e.Atom = rbuf.WINDOW()
+	e.Window = rbuf.XID()
+	e.Atom = rbuf.XID()
 	e.Timestamp = rbuf.CARD32()
 	e.Deleted = rbuf.Bool()
 	return rbuf.LastError

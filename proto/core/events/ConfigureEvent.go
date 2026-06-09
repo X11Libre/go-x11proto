@@ -22,9 +22,9 @@ func (e *ConfigureEvent) ReceiverWindow() base.WINDOW {
 }
 
 func (e *ConfigureEvent) Parse(rbuf base.ReadBuffer) error {
-	e.EventWindow = rbuf.WINDOW()
-	e.TargetWindow = rbuf.WINDOW()
-	e.AboveSibling = rbuf.WINDOW()
+	e.EventWindow = rbuf.XID()
+	e.TargetWindow = rbuf.XID()
+	e.AboveSibling = rbuf.XID()
 	e.X = rbuf.INT16()
 	e.Y = rbuf.INT16()
 	e.Width = rbuf.CARD16()

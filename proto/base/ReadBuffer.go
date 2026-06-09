@@ -83,16 +83,8 @@ func (r *ReadBuffer) CARD8() CARD8 {
 	return v
 }
 
-func (r *ReadBuffer) WINDOW() WINDOW {
-	return WINDOW(r.CARD32())
-}
-
-func (r *ReadBuffer) COLORMAP() COLORMAP {
-	return COLORMAP(r.CARD32())
-}
-
-func (r *ReadBuffer) VISUAL() VISUAL {
-	return VISUAL(r.CARD32())
+func (r *ReadBuffer) XID() XID {
+	return XID(r.CARD32())
 }
 
 func (r *ReadBuffer) Bool() bool {

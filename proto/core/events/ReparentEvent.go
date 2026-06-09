@@ -19,9 +19,9 @@ func (e *ReparentEvent) ReceiverWindow() base.WINDOW {
 }
 
 func (e *ReparentEvent) Parse(rbuf base.ReadBuffer) error {
-	e.EventWindow = rbuf.WINDOW()
-	e.TargetWindow = rbuf.WINDOW()
-	e.ParentWindow = rbuf.WINDOW()
+	e.EventWindow = rbuf.XID()
+	e.TargetWindow = rbuf.XID()
+	e.ParentWindow = rbuf.XID()
 	e.X = rbuf.INT16()
 	e.Y = rbuf.INT16()
 	e.OverrideRedirect = rbuf.Bool()

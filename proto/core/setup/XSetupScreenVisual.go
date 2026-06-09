@@ -16,7 +16,7 @@ type XSetupScreenVisual struct {
 }
 
 func (v *XSetupScreenVisual) Parse(readbuf *base.ReadBuffer) error {
-	v.Id = readbuf.VISUAL()
+	v.Id = readbuf.XID()
 	v.Class = readbuf.CARD8()
 	v.BitsPerChan = readbuf.CARD8()
 	v.NumColors = readbuf.CARD16()

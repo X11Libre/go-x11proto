@@ -30,9 +30,9 @@ func (e *KeyUpDownEvent) ReceiverWindow() base.WINDOW {
 func (e *KeyUpDownEvent) Parse(rbuf base.ReadBuffer) error {
 	e.Key = e.GenericEvent.Detail
 	e.Timestamp = rbuf.CARD32()
-	e.RootWindow = rbuf.WINDOW()
-	e.EventWindow = rbuf.WINDOW()
-	e.ChildWindow = rbuf.WINDOW()
+	e.RootWindow = rbuf.XID()
+	e.EventWindow = rbuf.XID()
+	e.ChildWindow = rbuf.XID()
 	e.RootX = rbuf.CARD16()
 	e.RootY = rbuf.CARD16()
 	e.EventX = rbuf.CARD16()

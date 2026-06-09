@@ -66,15 +66,15 @@ func (r CreateWindowRequest) IsMask(m base.CARD32) bool {
 func (r *CreateWindowRequest) WriteInto(writer *base.RequestWriter) error {
 	writer.SetOpcode(opcode.CreateWindow)
 	writer.SetParam0(r.Depth)
-	writer.WriteWINDOW(r.Wid)
-	writer.WriteWINDOW(r.Parent)
+	writer.WriteXID(r.Wid)
+	writer.WriteXID(r.Parent)
 	writer.WriteINT16(r.X)
 	writer.WriteINT16(r.Y)
 	writer.WriteCARD16(r.Width)
 	writer.WriteCARD16(r.Height)
 	writer.WriteCARD16(r.Border)
 	writer.WriteCARD16(r.Class)
-	writer.WriteVISUAL(r.Visual)
+	writer.WriteXID(r.Visual)
 	writer.WriteCARD32(r.ValueMask)
 
 	if r.IsMask(CW_BACKGROUND_PIXMAP) {

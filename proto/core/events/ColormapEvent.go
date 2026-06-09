@@ -17,8 +17,8 @@ func (e *ColormapEvent) ReceiverWindow() base.WINDOW {
 }
 
 func (e *ColormapEvent) Parse(rbuf base.ReadBuffer) error {
-	e.Window = rbuf.WINDOW()
-	e.Colormap = rbuf.COLORMAP()
+	e.Window = rbuf.XID()
+	e.Colormap = rbuf.XID()
 	e.New = rbuf.Bool()
 	e.Installed = rbuf.Bool()
 	return rbuf.LastError

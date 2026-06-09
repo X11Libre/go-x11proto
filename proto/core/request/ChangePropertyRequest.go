@@ -27,7 +27,7 @@ type ChangePropertyRequest struct {
 func (r *ChangePropertyRequest) WriteInto(writer *base.RequestWriter) error {
 	writer.SetOpcode(opcode.ChangeProperty)
 	writer.SetParam0(r.Mode)
-	writer.WriteWINDOW(r.Window)
+	writer.WriteXID(r.Window)
 	writer.WriteATOM(r.Property)
 	writer.WriteATOM(r.Type)
 	writer.WriteCARD8(r.Format)

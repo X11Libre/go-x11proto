@@ -13,8 +13,8 @@ type PolyFillRectRequest struct {
 
 func (r *PolyFillRectRequest) WriteInto(writer *base.RequestWriter) error {
 	writer.SetOpcode(opcode.PolyFillRectangle)
-	writer.WriteDRAWABLE(r.Drawable)
-	writer.WriteGC(r.Gc)
+	writer.WriteXID(r.Drawable)
+	writer.WriteXID(r.Gc)
 	for _, rect := range r.Rects {
 		rect.WriteInto(writer)
 	}

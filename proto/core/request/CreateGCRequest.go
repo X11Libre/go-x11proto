@@ -53,8 +53,8 @@ func (r CreateGCRequest) IsMask(m base.CARD32) bool {
 
 func (r *CreateGCRequest) WriteInto(writer *base.RequestWriter) error {
 	writer.SetOpcode(opcode.CreateGC)
-	writer.WriteGC(r.Gcid)
-	writer.WriteDRAWABLE(r.Drawable)
+	writer.WriteXID(r.Gcid)
+	writer.WriteXID(r.Drawable)
 	writer.WriteCARD32(r.ValueMask)
 
 	if r.IsMask(GC_MASK_FUNCTION) {

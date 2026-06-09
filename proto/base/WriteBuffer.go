@@ -70,22 +70,6 @@ func (rw *WriteBuffer) WriteXID(data XID) {
 	rw.WriteCARD32(CARD32(data))
 }
 
-func (rw *WriteBuffer) WriteDRAWABLE(data DRAWABLE) {
-	rw.WriteCARD32(CARD32(data))
-}
-
-func (rw *WriteBuffer) WriteWINDOW(data WINDOW) {
-	rw.WriteCARD32(CARD32(data))
-}
-
-func (rw *WriteBuffer) WriteGC(data GC) {
-	rw.WriteCARD32(CARD32(data))
-}
-
-func (rw *WriteBuffer) WriteVISUAL(data VISUAL) {
-	rw.WriteCARD32(CARD32(data))
-}
-
 func (rw *WriteBuffer) WriteBool(b bool) {
 	if b {
 		rw.WriteCARD8(1)

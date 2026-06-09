@@ -26,8 +26,8 @@ type XSetupScreen struct {
 }
 
 func (s *XSetupScreen) Parse(readbuf *base.ReadBuffer) error {
-	s.RootWindow = readbuf.WINDOW()
-	s.Colormap = readbuf.COLORMAP()
+	s.RootWindow = readbuf.XID()
+	s.Colormap = readbuf.XID()
 	s.WhitePixel = readbuf.CARD32()
 	s.BlackPixel = readbuf.CARD32()
 	s.InputMasks = readbuf.CARD32()
@@ -37,7 +37,7 @@ func (s *XSetupScreen) Parse(readbuf *base.ReadBuffer) error {
 	s.HeightMM = readbuf.CARD16()
 	s.MinColormaps = readbuf.CARD16()
 	s.MaxColormaps = readbuf.CARD16()
-	s.RootVisual = readbuf.VISUAL()
+	s.RootVisual = readbuf.XID()
 	s.BackingStore = readbuf.CARD8()
 	s.SaveUnder = readbuf.CARD8()
 	s.RootDepth = readbuf.CARD8()

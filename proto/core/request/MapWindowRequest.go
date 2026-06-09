@@ -11,6 +11,6 @@ type MapWindowRequest struct {
 
 func (r *MapWindowRequest) WriteInto(writer *base.RequestWriter) error {
 	writer.SetOpcode(opcode.MapWindow)
-	writer.WriteWINDOW(r.Window)
+	writer.WriteXID(r.Window)
 	return nil
 }
