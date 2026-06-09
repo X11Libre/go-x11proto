@@ -33,16 +33,16 @@ type Window struct {
 }
 
 func (w *Window) Create() error {
-	if w.XID != 0 {
+	if !w.XID.Invalid() {
 		base.MakeX11Error("foo")
 		return fmt.Errorf("window already created XID %d\n", w.XID)
 	}
 
-	if w.ParentXID == 0 && w.Parent != nil {
+	if w.ParentXID.Invalid() && w.Parent != nil {
 		w.ParentXID = w.Parent.XID
 	}
 
-	if w.ParentXID == 0 {
+	if w.ParentXID.Invalid() {
 		w.ParentXID = w.Conn.X11Conn.DefaultRoot()
 	}
 

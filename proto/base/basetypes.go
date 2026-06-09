@@ -12,6 +12,11 @@ type BOOL CARD8
 
 type ATOM CARD32
 type XID CARD32
+
+func (x XID) Invalid() bool {
+	return x == 0
+}
+
 type DRAWABLE = XID
 type WINDOW = DRAWABLE
 type COLORMAP = XID

@@ -38,7 +38,7 @@ func (w *Button) Repaint(down bool) {
 }
 
 func (w *Button) HandleWindowEvent(ev events.Event) bool {
-	if w.Font == 0 {
+	if w.Font.Invalid() {
 		fontid, err := w.Window.Conn.GetFont("fixed")
 		if err != nil {
 			panic(err)
@@ -46,7 +46,7 @@ func (w *Button) HandleWindowEvent(ev events.Event) bool {
 		w.Font = fontid
 	}
 
-	if w.Gc_up == 0 {
+	if w.Gc_up.Invalid() {
 		gcid, _ := rpc.CreateGC1(
 			w.Window.Conn.X11Conn,
 			w.Window.Conn.X11Conn.DefaultBlackPixel(),
@@ -56,7 +56,7 @@ func (w *Button) HandleWindowEvent(ev events.Event) bool {
 		w.Gc_up = gcid
 	}
 
-	if w.Gc_down == 0 {
+	if w.Gc_down.Invalid() {
 		gcid, _ := rpc.CreateGC1(
 			w.Window.Conn.X11Conn,
 			0xFF0000,

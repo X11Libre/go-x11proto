@@ -20,13 +20,13 @@ func (w *ChildWindow) Init() {
 }
 
 func (w *ChildWindow) HandleWindowEvent(ev events.Event) bool {
-	if w.font == 0 {
+	if w.font.Invalid() {
 		fontid, err := w.Window.Conn.GetFont("fixed")
 		errPanic(err, "OpenFont")
 		w.font = fontid
 	}
 
-	if w.Gc_black == 0 {
+	if w.Gc_black.Invalid() {
 		gcid, _ := rpc.CreateGC1(
 			w.Window.Conn.X11Conn,
 			w.Window.Conn.X11Conn.DefaultBlackPixel(),

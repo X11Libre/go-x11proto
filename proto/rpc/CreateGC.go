@@ -17,7 +17,7 @@ func CreateGC1(c *core.X11Conn, fg base.CARD32, bg base.CARD32, font base.FONT) 
 		Font:       font,
 	}
 
-	if font != 0 {
+	if !font.Invalid() {
 		req.ValueMask = req.ValueMask | request.GC_MASK_FONT
 	}
 

@@ -14,7 +14,7 @@ type TkConn struct {
 }
 
 func (tkc *TkConn) GetRoot() *Window {
-	if tkc.RootWindow.XID == 0 {
+	if tkc.RootWindow.XID.Invalid() {
 		tkc.RootWindow.XID = tkc.X11Conn.DefaultRoot()
 	}
 	return &tkc.RootWindow
