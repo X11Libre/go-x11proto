@@ -27,12 +27,13 @@ func (w *ChildWindow) HandleWindowEvent(ev events.Event) bool {
 	}
 
 	if w.Gc_black.Invalid() {
-		gcid, _ := rpc.CreateGC1(
+		gcid, err := rpc.CreateGC1(
 			w.Window.Conn.X11Conn,
 			w.Window.Conn.X11Conn.DefaultBlackPixel(),
 			w.Window.Conn.X11Conn.DefaultWhitePixel(),
 			w.font,
 		)
+		errPanic(err, "ChildWindow => CreateGC1()")
 		w.Gc_black = gcid
 	}
 
