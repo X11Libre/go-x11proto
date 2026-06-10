@@ -23,6 +23,9 @@ type X11Conn struct {
 	// set this to true if we wanna talk in big-endian (unusual)
 	BE bool
 
+	// DebugRequests logs every outgoing request (type, seq, fields) to stderr.
+	DebugRequests bool
+
 	conn      net.Conn
 	writeMu   sync.Mutex
 	nextSeq   base.CARD16
@@ -236,6 +239,10 @@ func (c *X11Conn) Send(req base.Request) (base.CARD16, error) {
 
 	seq := c.nextSeq
 	c.nextSeq++
+
+	if c.DebugRequests {
+		log.Printf("=> [seq %d] %T %+v", seq, req, req)
+	}
 
 	if err := c.writeRequest(req, seq); err != nil {
 		return 0, c.errorF("Send(): %w", err)
