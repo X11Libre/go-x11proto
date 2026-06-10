@@ -377,7 +377,6 @@ func (c *X11Conn) writeRequest(req base.Request, seq base.CARD16) error {
 		return err
 	}
 
-	//	log.Printf("REQUEST %T bytes: %+v\n", req, writer.ToBytes())
 	_, err := c.conn.Write(writer.ToBytes())
 	return err
 }
