@@ -47,22 +47,28 @@ func (w *Button) HandleWindowEvent(ev events.Event) bool {
 	}
 
 	if w.Gc_up.Invalid() {
-		gcid, _ := rpc.CreateGC1(
+		gcid, err := rpc.CreateGC1(
 			w.Window.Conn.X11Conn,
 			w.Window.Conn.X11Conn.DefaultBlackPixel(),
 			w.Window.Conn.X11Conn.DefaultWhitePixel(),
 			w.Font,
 		)
+		if err != nil {
+			panic(err)
+		}
 		w.Gc_up = gcid
 	}
 
 	if w.Gc_down.Invalid() {
-		gcid, _ := rpc.CreateGC1(
+		gcid, err := rpc.CreateGC1(
 			w.Window.Conn.X11Conn,
 			0xFF0000,
 			w.Window.Conn.X11Conn.DefaultWhitePixel(),
 			w.Font,
 		)
+		if err != nil {
+			panic(err)
+		}
 		w.Gc_down = gcid
 	}
 
