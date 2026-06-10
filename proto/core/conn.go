@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/atoms"
+	"github.com/X11Libre/go-x11proto/proto/core/errorcode"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
 	"github.com/X11Libre/go-x11proto/proto/core/setup"
 	"io"
@@ -170,11 +171,23 @@ func (c *X11Conn) convBE16(data []byte) uint16 {
 	}
 }
 
+func (c *X11Conn) convBE32(data []byte) uint32 {
+	if c.BE {
+		return binary.BigEndian.Uint32(data)
+	} else {
+		return binary.LittleEndian.Uint32(data)
+	}
+}
+
 func (c *X11Conn) handleError(header []byte) {
 	code := header[1]
 	seq := c.convBE16(header[2:4])
+	badID := c.convBE32(header[4:8])
+	minorOpcode := c.convBE16(header[8:10])
+	majorOpcode := header[10]
 
-	log.Printf("X11 Error: code=%d, seq=%d\n", code, seq)
+	log.Printf("X11 Error: %s (code=%d), seq=%d, opcode=%d.%d, id=%d\n",
+		errorcode.Name(code), code, seq, majorOpcode, minorOpcode, badID)
 
 	err := c.errorF("x11 error code %d", code)
 
