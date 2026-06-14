@@ -400,8 +400,6 @@ func (c *X11Conn) DeliverWindowEvent(ev events.Event) bool {
 		return handler.HandleX11WindowEvent(window, ev)
 	}
 
-	log.Printf("could not deliver event - no listener on window %d (%0x)\n", window, window)
-	log.Printf(" event: %T %+v\n", ev, ev)
 	return false
 }
 

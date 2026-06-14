@@ -16,16 +16,11 @@ type ClearAreaRequest struct {
 
 func (r *ClearAreaRequest) WriteInto(writer *base.RequestWriter) error {
 	writer.SetOpcode(opcode.ClearArea)
+	writer.SetParam0bool(r.Exposures)
 	writer.WriteXID(r.Window)
 	writer.WriteINT16(r.X)
 	writer.WriteINT16(r.Y)
 	writer.WriteCARD16(r.Width)
 	writer.WriteCARD16(r.Height)
-	if r.Exposures {
-		writer.WriteCARD8(1)
-	} else {
-		writer.WriteCARD8(0)
-	}
-	writer.Pad()
 	return nil
 }
