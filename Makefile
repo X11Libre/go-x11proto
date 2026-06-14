@@ -17,3 +17,6 @@ fmt:
 clean:
 	for d in $(SUBDIRS) ; do $(MAKE) -C $$d clean ; done
 	rm -Rf $(EXECUTABLE) $(TEMPFILES)
+
+tetris:
+	$(GO) run ./demo/tetris64

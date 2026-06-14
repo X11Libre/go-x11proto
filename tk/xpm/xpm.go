@@ -73,7 +73,7 @@ func extractStrings(src string) []string {
 	}
 	src = src[start:]
 
-	end := strings.IndexByte(src, '}')
+	end := strings.LastIndex(src, "}")
 	if end < 0 {
 		return nil
 	}

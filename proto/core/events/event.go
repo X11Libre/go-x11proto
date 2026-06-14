@@ -1,10 +1,8 @@
 package events
 
 import (
-	"fmt"
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/events/event_code"
-	"log"
 )
 
 type Event interface {
@@ -22,6 +20,18 @@ type GenericEvent struct {
 
 func (ev GenericEvent) GetType() base.CARD8 {
 	return ev.Type
+}
+
+func (ev GenericEvent) ReceiverWindow() base.WINDOW {
+	return 0
+}
+
+type unhandledEvent struct {
+	GenericEvent
+}
+
+func (e unhandledEvent) ReceiverWindow() base.WINDOW {
+	return 0
 }
 
 func ParseEvent(data []byte, be bool) (Event, error) {
@@ -73,7 +83,6 @@ func ParseEvent(data []byte, be bool) (Event, error) {
 	case event_code.CreateNotify:
 		return ParseEvent_CreateNotify(gev, rbuf)
 	default:
-		log.Printf("unknown event %d\n", gev.Type)
-		return nil, fmt.Errorf("unknown event %d", gev.Type)
+		return unhandledEvent{gev}, nil
 	}
 }
