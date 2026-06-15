@@ -251,10 +251,14 @@ func (c *X11Conn) Send(req base.Request) (base.CARD16, error) {
 }
 
 func (c *X11Conn) SendAndWait(req base.Request) (*base.ReplyReader, error) {
-	seq, err := c.Send(req)
-	if err != nil {
-		return nil, c.errorF("SendAndWait(): %w", err)
+	c.writeMu.Lock()
+
+	// first sequence number is 1
+	if c.nextSeq == 0 {
+		c.nextSeq++
 	}
+	seq := c.nextSeq
+	c.nextSeq++
 
 	pr := &pendingRequest{
 		replyCh: make(chan base.ReplyReader, 1),
@@ -265,6 +269,17 @@ func (c *X11Conn) SendAndWait(req base.Request) (*base.ReplyReader, error) {
 	c.pendingMu.Lock()
 	c.pending[seq] = pr
 	c.pendingMu.Unlock()
+
+	if c.DebugRequests {
+		log.Printf("=> [seq %d] %T %+v", seq, req, req)
+	}
+
+	if err := c.writeRequest(req, seq); err != nil {
+		c.removePending(seq)
+		c.writeMu.Unlock()
+		return nil, c.errorF("SendAndWait(): %w", err)
+	}
+	c.writeMu.Unlock()
 
 	select {
 	case reply := <-pr.replyCh:
