@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"embed"
+	_ "embed"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -36,11 +36,6 @@ var loader320PNG []byte
 
 //go:embed assets/tetris.sid
 var sidData []byte
-
-// digit glyphs of the 320x200 monochrome font, one 8x8 PNG per digit.
-//
-//go:embed assets/320x200-mono/*.png
-var monoFontFS embed.FS
 
 type appState int
 
@@ -97,6 +92,8 @@ type TetrisWin struct {
 
 	bg       base.PIXMAP
 	loaderBg base.PIXMAP
+
+	digitPix [10]base.PIXMAP // greyscale digit glyphs, rebuilt per resolution
 
 	layout     resLayout
 	scale      int
@@ -225,26 +222,6 @@ func loadLoader(resName string) []byte {
 	return loader320PNG
 }
 
-// loadFontGlyphs installs the digit glyphs ('0'..'9') from the per-digit PNGs
-// in assets/320x200-mono/. An on-disk file takes precedence over the embedded
-// copy (so glyphs can be edited without rebuilding); if neither is available
-// or fails to decode, the built-in bitmap in the font package is kept.
-func loadFontGlyphs() {
-	for d := '0'; d <= '9'; d++ {
-		var data []byte
-		if p := assetPathFor(fmt.Sprintf("320x200-mono/%c.png", d)); p != "" {
-			data, _ = os.ReadFile(p)
-		}
-		if data == nil {
-			data, _ = monoFontFS.ReadFile(fmt.Sprintf("assets/320x200-mono/%c.png", d))
-		}
-		if data == nil {
-			continue
-		}
-		tetris_font.LoadGlyphPNG(d, data)
-	}
-}
-
 func decodeImage(data []byte) (*xpm.Image, error) {
 	img, err := png.Decode(bytes.NewReader(data))
 	if err == nil {
@@ -354,6 +331,9 @@ func (w *TetrisWin) createWin(screenW, screenH int) {
 
 	w.frameW = res.w
 	w.frameH = res.h
+
+	// build the greyscale digit glyphs scaled for this resolution
+	w.buildDigitPixmaps()
 
 	// map child windows first
 	rpc.MapWindow(w.conn, w.bgWin)
@@ -589,12 +569,10 @@ func (w *TetrisWin) drawGame() {
 
 	bgDraw := tk_core.Drawable{Conn: w.tkConn, XID: w.bgWin}
 
-	tetris_font.DrawString(bgDraw, w.gcText,
-		base.INT16(l.scoreX), base.INT16(l.scoreY), fs, fmt.Sprintf("%06d", gs.Score))
-	tetris_font.DrawString(bgDraw, w.gcText,
-		base.INT16(l.linesX), base.INT16(l.linesY), fs, fmt.Sprintf("%03d", gs.Lines))
-	tetris_font.DrawString(bgDraw, w.gcText,
-		base.INT16(l.levelX), base.INT16(l.levelY), fs, fmt.Sprintf("%02d", gs.Level))
+	// score/lines/level use the greyscale digit pixmaps (scaled from masters)
+	w.drawNumber(w.bgWin, base.INT16(l.scoreX), base.INT16(l.scoreY), fmt.Sprintf("%06d", gs.Score))
+	w.drawNumber(w.bgWin, base.INT16(l.linesX), base.INT16(l.linesY), fmt.Sprintf("%03d", gs.Lines))
+	w.drawNumber(w.bgWin, base.INT16(l.levelX), base.INT16(l.levelY), fmt.Sprintf("%02d", gs.Level))
 
 	if gs.GameOver {
 		tetris_font.DrawString(bgDraw, w.gcText,
@@ -871,8 +849,6 @@ func pickBestRes(screenW, screenH int) int {
 }
 
 func main() {
-	loadFontGlyphs()
-
 	conn, err := proto.Dial("")
 	errPanic(err, "connecting")
 	defer conn.Close()
