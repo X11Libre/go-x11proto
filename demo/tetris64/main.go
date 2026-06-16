@@ -85,7 +85,7 @@ type TetrisWin struct {
 	bgWin    base.WINDOW    // child of frame, holds bg pixmap, centered
 	boardWin base.WINDOW    // child of bgWin, holds board rendering
 
-	gcWhite  base.GC
+	gcText  base.GC
 	gcBlack  base.GC
 	gcColors map[uint8]base.GC
 	gcGhost  map[uint8]base.GC
@@ -425,10 +425,12 @@ func (w *TetrisWin) drawGame() {
 		errPanic(err, "CreateGC1 black")
 		w.gcBlack = gcid
 	}
-	if w.gcWhite.Invalid() {
-		gcid, err := rpc.CreateGC1(w.conn, 0xFFFFFF, 0x000000, 0)
-		errPanic(err, "CreateGC1 white")
-		w.gcWhite = gcid
+	if w.gcText.Invalid() {
+		// washed-out light gray (C64 light-gray, #BABABA) of the original
+		// score/lines/level readout — not stark white, to match the artwork.
+		gcid, err := rpc.CreateGC1(w.conn, 0xBABABA, 0x000000, 0)
+		errPanic(err, "CreateGC1 text")
+		w.gcText = gcid
 	}
 
 	fs := w.scale
@@ -546,15 +548,15 @@ func (w *TetrisWin) drawGame() {
 
 	bgDraw := tk_core.Drawable{Conn: w.tkConn, XID: w.bgWin}
 
-	tetris_font.DrawString(bgDraw, w.gcWhite,
+	tetris_font.DrawString(bgDraw, w.gcText,
 		base.INT16(l.scoreX), base.INT16(l.scoreY), fs, fmt.Sprintf("%06d", gs.Score))
-	tetris_font.DrawString(bgDraw, w.gcWhite,
+	tetris_font.DrawString(bgDraw, w.gcText,
 		base.INT16(l.linesX), base.INT16(l.linesY), fs, fmt.Sprintf("%03d", gs.Lines))
-	tetris_font.DrawString(bgDraw, w.gcWhite,
+	tetris_font.DrawString(bgDraw, w.gcText,
 		base.INT16(l.levelX), base.INT16(l.levelY), fs, fmt.Sprintf("%02d", gs.Level))
 
 	if gs.GameOver {
-		tetris_font.DrawString(bgDraw, w.gcWhite,
+		tetris_font.DrawString(bgDraw, w.gcText,
 			base.INT16(l.gameOverX), base.INT16(l.gameOverY), fs, "GAME OVER")
 	}
 
@@ -568,7 +570,7 @@ func (w *TetrisWin) drawGame() {
 		w.fillRects(w.bgWin, w.gcBlack, []base.Rectangle{
 			{X: base.INT16(hx + 1), Y: base.INT16(hy + 1), Width: base.CARD16(hbw - 2), Height: base.CARD16(hbh - 2)},
 		})
-		w.fillRects(w.bgWin, w.gcWhite, []base.Rectangle{
+		w.fillRects(w.bgWin, w.gcText, []base.Rectangle{
 			{X: base.INT16(hx), Y: base.INT16(hy), Width: base.CARD16(hbw), Height: 1},
 			{X: base.INT16(hx), Y: base.INT16(hy + hbh), Width: base.CARD16(hbw), Height: 1},
 			{X: base.INT16(hx), Y: base.INT16(hy), Width: 1, Height: base.CARD16(hbh)},
@@ -576,10 +578,10 @@ func (w *TetrisWin) drawGame() {
 		})
 
 		titleX := (res.w - 4*8*fs) / 2
-		tetris_font.DrawString(bgDraw, w.gcWhite,
+		tetris_font.DrawString(bgDraw, w.gcText,
 			base.INT16(titleX), base.INT16(hy+12*res.h/200), fs, "HELP")
 		sepY := hy + 20*res.h/200
-		w.fillRects(w.bgWin, w.gcWhite, []base.Rectangle{
+		w.fillRects(w.bgWin, w.gcText, []base.Rectangle{
 			{X: base.INT16(hx + 16), Y: base.INT16(sepY), Width: base.CARD16(hbw - 32), Height: 1},
 		})
 
@@ -598,12 +600,12 @@ func (w *TetrisWin) drawGame() {
 		}
 		for _, hl := range helpLines {
 			yy := hy + hl.y*res.h/200
-			tetris_font.DrawString(bgDraw, w.gcWhite,
+			tetris_font.DrawString(bgDraw, w.gcText,
 				base.INT16(hx+16*res.w/320), base.INT16(yy), fs, hl.k)
 		}
 
 		closeX := (res.w - 20*8*fs) / 2
-		tetris_font.DrawString(bgDraw, w.gcWhite,
+		tetris_font.DrawString(bgDraw, w.gcText,
 			base.INT16(closeX), base.INT16(hy+112*res.h/200), fs, "PRESS F1 TO CLOSE")
 	}
 }
