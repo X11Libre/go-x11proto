@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	_ "embed"
+	"embed"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -36,6 +36,11 @@ var loader320PNG []byte
 
 //go:embed assets/tetris.sid
 var sidData []byte
+
+// digit glyphs of the 320x200 monochrome font, one 8x8 PNG per digit.
+//
+//go:embed assets/320x200-mono/*.png
+var monoFontFS embed.FS
 
 type appState int
 
@@ -202,6 +207,26 @@ func loadLoader(resName string) []byte {
 		}
 	}
 	return loader320PNG
+}
+
+// loadFontGlyphs installs the digit glyphs ('0'..'9') from the per-digit PNGs
+// in assets/320x200-mono/. An on-disk file takes precedence over the embedded
+// copy (so glyphs can be edited without rebuilding); if neither is available
+// or fails to decode, the built-in bitmap in the font package is kept.
+func loadFontGlyphs() {
+	for d := '0'; d <= '9'; d++ {
+		var data []byte
+		if p := assetPathFor(fmt.Sprintf("320x200-mono/%c.png", d)); p != "" {
+			data, _ = os.ReadFile(p)
+		}
+		if data == nil {
+			data, _ = monoFontFS.ReadFile(fmt.Sprintf("assets/320x200-mono/%c.png", d))
+		}
+		if data == nil {
+			continue
+		}
+		tetris_font.LoadGlyphPNG(d, data)
+	}
 }
 
 func decodeImage(data []byte) (*xpm.Image, error) {
@@ -830,6 +855,8 @@ func pickBestRes(screenW, screenH int) int {
 }
 
 func main() {
+	loadFontGlyphs()
+
 	conn, err := proto.Dial("")
 	errPanic(err, "connecting")
 	defer conn.Close()
