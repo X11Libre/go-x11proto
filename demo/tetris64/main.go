@@ -178,8 +178,24 @@ func (r *configureWinReq) WriteInto(w *base.RequestWriter) error {
 // ---- asset helpers ----
 
 func assetPathFor(name string) string {
-	dir := "demo/tetris64/assets"
-	candidates := []string{filepath.Join(dir, name)}
+	var candidates []string
+	// Walk up from the working directory so the on-disk assets are found
+	// whether the program is launched from the repo root, from demo/tetris64,
+	// or any directory in between (lets edited PNGs take effect without a
+	// rebuild). Fall back to assets next to the executable.
+	if cwd, err := os.Getwd(); err == nil {
+		d := cwd
+		for i := 0; i < 8; i++ {
+			candidates = append(candidates,
+				filepath.Join(d, "demo/tetris64/assets", name),
+				filepath.Join(d, "assets", name))
+			parent := filepath.Dir(d)
+			if parent == d {
+				break
+			}
+			d = parent
+		}
+	}
 	if exe, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "assets", name))
 	}
