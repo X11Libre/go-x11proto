@@ -93,7 +93,8 @@ type TetrisWin struct {
 	bg       base.PIXMAP
 	loaderBg base.PIXMAP
 
-	digitPix [10]base.PIXMAP // greyscale digit glyphs, rebuilt per resolution
+	digitPix  [10]base.PIXMAP // digit glyphs, rebuilt per resolution
+	glyphTint [3]byte         // digit colour, sampled from the background art
 
 	layout     resLayout
 	scale      int
@@ -258,10 +259,12 @@ func (w *TetrisWin) createWin(screenW, screenH int) {
 	w.scale = res.scale
 	w.layout = layouts[w.resIdx]
 	w.showGhost = true
+	l := w.layout
 
+	// digit colour matches the background's score text (sampled from the FHD art)
+	w.glyphTint = glyphTintColor()
 	w.bg = w.uploadBg(loadFrame(res.name))
 	w.loaderBg = w.uploadBg(loadLoader(res.name))
-	l := w.layout
 
 	// top-level frame window (black background, resizable)
 	w.frameWin = tk_core.Window{
