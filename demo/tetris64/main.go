@@ -28,14 +28,18 @@ import (
 	"github.com/X11Libre/go-x11proto/tk/xpm"
 )
 
-//go:embed assets/tetris_c64_frame_320_color.png
+//go:embed assets/color/320/frame.png
 var frame320PNG []byte
 
-//go:embed assets/tetris_c64_loader_320_color.png
+//go:embed assets/color/320/loader.png
 var loader320PNG []byte
 
 //go:embed assets/tetris.sid
 var sidData []byte
+
+// theme selects the asset set; combined with the resolution name it forms the
+// asset path prefix "<theme>/<res>/" (e.g. "color/FHD"). Currently fixed.
+var theme = "color"
 
 type appState int
 
@@ -206,7 +210,7 @@ func assetPathFor(name string) string {
 }
 
 func loadFrame(resName string) []byte {
-	if p := assetPathFor("tetris_c64_frame_" + resName + "_color.png"); p != "" {
+	if p := assetPathFor(filepath.Join(theme, resName, "frame.png")); p != "" {
 		if d, err := os.ReadFile(p); err == nil {
 			return d
 		}
@@ -215,7 +219,7 @@ func loadFrame(resName string) []byte {
 }
 
 func loadLoader(resName string) []byte {
-	if p := assetPathFor("tetris_c64_loader_" + resName + "_color.png"); p != "" {
+	if p := assetPathFor(filepath.Join(theme, resName, "loader.png")); p != "" {
 		if d, err := os.ReadFile(p); err == nil {
 			return d
 		}
