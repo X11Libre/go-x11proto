@@ -18,12 +18,12 @@ import (
 // and up for the larger modes, preserving their anti-aliased grey pixels rather
 // than being reduced to a 1-bit bitmap.
 //
-//go:embed assets/320x200-mono/orig.orig/*.png
+// High-res greyscale digit masters, shared by all themes/resolutions: they are
+// tinted (per theme) and scaled (per resolution) at runtime, so they are not
+// split by theme/resolution like the backgrounds.
+//
+//go:embed assets/glyphs/*.png
 var glyphMastersFS embed.FS
-
-// masterDirs are the candidate subdirectories (under assets/320x200-mono and as
-// embedded paths) that hold the high-res greyscale digit masters.
-var masterDirs = []string{"orig.orig", "orig"}
 
 type glyphMaster struct {
 	img                    image.Image
@@ -131,21 +131,11 @@ func loadGlyphMasters() {
 			continue
 		}
 		var data []byte
-		for _, dir := range masterDirs {
-			if p := assetPathFor(fmt.Sprintf("320x200-mono/%s/%d.png", dir, d)); p != "" {
-				if b, err := os.ReadFile(p); err == nil {
-					data = b
-					break
-				}
-			}
+		if p := assetPathFor(fmt.Sprintf("glyphs/%d.png", d)); p != "" {
+			data, _ = os.ReadFile(p)
 		}
 		if data == nil {
-			for _, dir := range masterDirs {
-				if b, err := glyphMastersFS.ReadFile(fmt.Sprintf("assets/320x200-mono/%s/%d.png", dir, d)); err == nil {
-					data = b
-					break
-				}
-			}
+			data, _ = glyphMastersFS.ReadFile(fmt.Sprintf("assets/glyphs/%d.png", d))
 		}
 		if data == nil {
 			continue
