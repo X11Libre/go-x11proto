@@ -21,7 +21,6 @@ import (
 	"github.com/X11Libre/go-x11proto/proto/base"
 	proto_core "github.com/X11Libre/go-x11proto/proto/core"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
-	"github.com/X11Libre/go-x11proto/proto/core/opcode"
 	"github.com/X11Libre/go-x11proto/proto/core/request"
 	"github.com/X11Libre/go-x11proto/proto/rpc"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
@@ -116,65 +115,6 @@ func errPanic(e error, s string) {
 	if e != nil {
 		panic(s + ": " + e.Error())
 	}
-}
-
-// ---- raw request helper for requests without existing structs ----
-
-type destroyWinReq struct {
-	Window base.WINDOW
-}
-
-func (r *destroyWinReq) WriteInto(w *base.RequestWriter) error {
-	w.SetOpcode(opcode.DestroyWindow)
-	w.WriteCARD32(base.CARD32(r.Window))
-	return nil
-}
-
-type getInputFocusReq struct{}
-
-func (r *getInputFocusReq) WriteInto(w *base.RequestWriter) error {
-	w.SetOpcode(opcode.GetInputFocus)
-	return nil
-}
-
-type sendEventReq struct {
-	propagate bool
-	dest      base.WINDOW
-	eventMask base.CARD32
-	eventData [32]byte
-}
-
-func (r *sendEventReq) WriteInto(w *base.RequestWriter) error {
-	w.SetOpcode(opcode.SendEvent)
-	if r.propagate {
-		w.SetParam0(1)
-	}
-	w.WriteCARD32(base.CARD32(r.dest))
-	w.WriteCARD32(r.eventMask)
-	w.WriteBytes(r.eventData[:])
-	return nil
-}
-
-type configureWinReq struct {
-	Window base.WINDOW
-	X, Y   base.INT16
-	setPos bool
-}
-
-func (r *configureWinReq) WriteInto(w *base.RequestWriter) error {
-	w.SetOpcode(opcode.ConfigureWindow)
-	var mask base.CARD16
-	if r.setPos {
-		mask |= 0x0003 // CW_X | CW_Y
-	}
-	w.WriteCARD32(base.CARD32(r.Window))
-	w.WriteCARD16(mask)
-	w.WriteCARD16(0) // padding to 4-byte alignment
-	if r.setPos {
-		w.WriteCARD32(base.CARD32(uint16(r.X)))
-		w.WriteCARD32(base.CARD32(uint16(r.Y)))
-	}
-	return nil
 }
 
 // ---- asset helpers ----
@@ -373,11 +313,11 @@ func (w *TetrisWin) toggleFullscreen() {
 	putCARD32(ev[12:16], 2, be) // action = toggle
 	putCARD32(ev[16:20], uint32(fsAtom), be)
 
-	w.conn.Send(&sendEventReq{
-		propagate: false,
-		dest:      w.conn.DefaultRoot(),
-		eventMask: 0xFFFFFF,
-		eventData: ev,
+	w.conn.Send(&request.SendEventRequest{
+		Propagate:   false,
+		Destination: w.conn.DefaultRoot(),
+		EventMask:   0xFFFFFF,
+		Event:       ev,
 	})
 }
 
@@ -683,11 +623,11 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 			if bgY < 0 {
 				bgY = 0
 			}
-			w.conn.Send(&configureWinReq{
-				Window: w.bgWin,
-				X:      base.INT16(bgX),
-				Y:      base.INT16(bgY),
-				setPos: true,
+			w.conn.Send(&request.ConfigureWindowRequest{
+				Window:    w.bgWin,
+				ValueMask: request.CONFIG_WINDOW_X | request.CONFIG_WINDOW_Y,
+				X:         base.INT16(bgX),
+				Y:         base.INT16(bgY),
 			})
 		}
 	case *events.KeyPressEvent:
@@ -724,7 +664,7 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 			return true
 		}
 
-		if e.Detail == 36 { // Return - restart
+		if e.Detail == 36 && gs.GameOver { // Return - restart after game over
 			gs.Reset()
 			w.drawGame()
 			return true
@@ -740,7 +680,7 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 				gs.MoveDown()
 			case 111, 107: // up, k
 				gs.Rotate()
-			case 65: // space
+			case 65, 36: // space, Return - hard drop
 				gs.HardDrop()
 			}
 			w.drawGame()
@@ -758,10 +698,10 @@ func (w *TetrisWin) cycleRes(dir int) {
 	screenH := int(screen.Height)
 
 	// destroy all 3 windows (children before parent)
-	w.conn.Send(&destroyWinReq{Window: w.boardWin})
-	w.conn.Send(&destroyWinReq{Window: w.bgWin})
-	w.conn.Send(&destroyWinReq{Window: w.frameWin.XID})
-	w.conn.SendAndWait(&getInputFocusReq{})
+	rpc.DestroyWindow(w.conn, w.boardWin)
+	rpc.DestroyWindow(w.conn, w.bgWin)
+	rpc.DestroyWindow(w.conn, w.frameWin.XID)
+	w.conn.SendAndWait(&request.GetInputFocusRequest{}) // round-trip barrier
 
 	// reset XIDs so Create() doesn't think they already exist
 	w.frameWin.XID = 0
