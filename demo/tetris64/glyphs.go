@@ -13,33 +13,19 @@ import (
 	"github.com/X11Libre/go-x11proto/tk/xpm"
 )
 
-// High-resolution greyscale master glyphs (the manually-extracted originals).
-// These are the source for every resolution: they are scaled down for 320x200
-// and up for the larger modes, preserving their anti-aliased grey pixels rather
-// than being reduced to a 1-bit bitmap.
+// Master digit glyphs: aligned, centred, baseline-matched, with a transparent
+// (alpha) background. One shared set drives every theme/resolution — they are
+// scaled per resolution and tinted per theme at load time. The alpha channel is
+// the glyph coverage; the RGB (white) is irrelevant since the digits are tinted.
 //
-// High-res greyscale digit masters, shared by all themes/resolutions: they are
-// tinted (per theme) and scaled (per resolution) at runtime, so they are not
-// split by theme/resolution like the backgrounds.
-//
-//go:embed assets/glyphs/*.png
+//go:embed assets/glyph-masters/*.png
 var glyphMastersFS embed.FS
 
-type glyphMaster struct {
-	img                    image.Image
-	minX, minY, maxX, maxY int // content bounding box (non-black pixels)
-}
+var glyphMasters [10]image.Image
 
-var glyphMasters [10]*glyphMaster
-
-// glyphLumFull is the master grey level treated as "fully lit"; master pixels
-// at or above it map to the full tint colour.
+// glyphLumFull is the coverage value treated as "fully lit" (the masters' peak
+// alpha): coverage at or above it maps to the full tint colour.
 const glyphLumFull = 205
-
-func glyphLum(img image.Image, x, y int) int {
-	r, g, b, _ := img.At(x, y).RGBA()
-	return (int(r>>8)*30 + int(g>>8)*59 + int(b>>8)*11) / 100
-}
 
 // tintByte scales tint channel t by coverage cov (0..glyphLumFull -> 0..t).
 func tintByte(t byte, cov int) byte {
@@ -122,61 +108,33 @@ func sampleGlyphTint(img *xpm.Image, l resLayout, scale int) [3]byte {
 	return [3]byte{byte(sr / n), byte(sg / n), byte(sb / n)}
 }
 
-// loadGlyphMasters decodes the 0..9 master PNGs once and records each glyph's
-// content bounding box. On-disk files (editable without a rebuild) take
-// precedence over the embedded copies.
+// loadGlyphMasters decodes the 0..9 master PNGs once. On-disk files (editable
+// without a rebuild) take precedence over the embedded copies.
 func loadGlyphMasters() {
 	for d := 0; d < 10; d++ {
 		if glyphMasters[d] != nil {
 			continue
 		}
 		var data []byte
-		if p := assetPathFor(fmt.Sprintf("glyphs/%d.png", d)); p != "" {
+		if p := assetPathFor(fmt.Sprintf("glyph-masters/%d.png", d)); p != "" {
 			data, _ = os.ReadFile(p)
 		}
 		if data == nil {
-			data, _ = glyphMastersFS.ReadFile(fmt.Sprintf("assets/glyphs/%d.png", d))
+			data, _ = glyphMastersFS.ReadFile(fmt.Sprintf("assets/glyph-masters/%d.png", d))
 		}
 		if data == nil {
 			continue
 		}
-		img, err := png.Decode(bytes.NewReader(data))
-		if err != nil {
-			continue
+		if img, err := png.Decode(bytes.NewReader(data)); err == nil {
+			glyphMasters[d] = img
 		}
-		b := img.Bounds()
-		minX, minY, maxX, maxY := b.Max.X, b.Max.Y, b.Min.X, b.Min.Y
-		found := false
-		for y := b.Min.Y; y < b.Max.Y; y++ {
-			for x := b.Min.X; x < b.Max.X; x++ {
-				if glyphLum(img, x, y) >= 30 {
-					found = true
-					if x < minX {
-						minX = x
-					}
-					if y < minY {
-						minY = y
-					}
-					if x > maxX {
-						maxX = x
-					}
-					if y > maxY {
-						maxY = y
-					}
-				}
-			}
-		}
-		if !found {
-			continue
-		}
-		glyphMasters[d] = &glyphMaster{img, minX, minY, maxX, maxY}
 	}
 }
 
-// buildDigitPixmaps renders each digit master into a greyscale (8*scale)^2 cell
-// pixmap sized for the current resolution. The glyph is scaled (area-averaged)
-// to 7 C64 rows tall with proportional width, centred horizontally, with a 1
-// C64-pixel top margin — i.e. the same metrics as the bitmap font, but greyscale.
+// buildDigitPixmaps scales each (already aligned) master into an (8*scale)^2
+// cell pixmap for the current resolution. The master's alpha channel is the
+// coverage; it is area-averaged down/up to the cell size and composited over
+// black in the tint colour (the pixmaps are opaque, blitted with CopyArea).
 func (w *TetrisWin) buildDigitPixmaps() {
 	loadGlyphMasters()
 	// release any pixmaps from a previous resolution
@@ -186,57 +144,45 @@ func (w *TetrisWin) buildDigitPixmaps() {
 			w.digitPix[d] = 0
 		}
 	}
-	scale := w.scale
-	cell := 8 * scale
-	gh := 7 * scale  // glyph height: 7 C64 rows
-	top := scale     // 1 C64-pixel top margin
+	cell := 8 * w.scale
 	for d := 0; d < 10; d++ {
 		m := glyphMasters[d]
 		if m == nil {
 			w.digitPix[d] = 0
 			continue
 		}
-		bw := m.maxX - m.minX + 1
-		bh := m.maxY - m.minY + 1
-		gw := bw * gh / bh // keep each glyph's aspect (so e.g. '4' stays wider)
-		if gw > cell {
-			gw = cell
-		}
-		xoff := (cell - gw) / 2
-
+		mb := m.Bounds()
+		mw, mh := mb.Dx(), mb.Dy()
 		px := make([]byte, cell*cell*4)
 		for i := 3; i < len(px); i += 4 {
 			px[i] = 0xFF // opaque black background
 		}
-		for ty := 0; ty < gh; ty++ {
-			for tx := 0; tx < gw; tx++ {
-				// source region covered by this destination pixel
-				sx0 := m.minX + tx*bw/gw
-				sx1 := m.minX + (tx+1)*bw/gw
-				sy0 := m.minY + ty*bh/gh
-				sy1 := m.minY + (ty+1)*bh/gh
+		for ty := 0; ty < cell; ty++ {
+			for tx := 0; tx < cell; tx++ {
+				// source region of the master covered by this cell pixel
+				sx0 := tx * mw / cell
+				sx1 := (tx + 1) * mw / cell
+				sy0 := ty * mh / cell
+				sy1 := (ty + 1) * mh / cell
 				if sx1 <= sx0 {
 					sx1 = sx0 + 1
 				}
 				if sy1 <= sy0 {
 					sy1 = sy0 + 1
 				}
-				var sr, sg, sb, n int
+				var sa, n int
 				for yy := sy0; yy < sy1; yy++ {
 					for xx := sx0; xx < sx1; xx++ {
-						r, g, b, _ := m.img.At(xx, yy).RGBA()
-						sr += int(r >> 8)
-						sg += int(g >> 8)
-						sb += int(b >> 8)
+						_, _, _, a := m.At(mb.Min.X+xx, mb.Min.Y+yy).RGBA()
+						sa += int(a >> 8)
 						n++
 					}
 				}
 				if n == 0 {
 					n = 1
 				}
-				// master luminance acts as coverage; fill with the tint colour
-				cov := (sr/n*30 + sg/n*59 + sb/n*11) / 100
-				o := ((top+ty)*cell + xoff + tx) * 4
+				cov := sa / n // averaged alpha = glyph coverage
+				o := (ty*cell + tx) * 4
 				px[o] = tintByte(w.glyphTint[0], cov)
 				px[o+1] = tintByte(w.glyphTint[1], cov)
 				px[o+2] = tintByte(w.glyphTint[2], cov)
@@ -253,8 +199,8 @@ func (w *TetrisWin) buildDigitPixmaps() {
 	}
 }
 
-// drawNumber blits the greyscale digit pixmaps for text onto target, advancing
-// one fixed-width cell (8*scale) per character.
+// drawNumber blits the digit pixmaps for text onto target, advancing one
+// fixed-width cell (8*scale) per character.
 func (w *TetrisWin) drawNumber(target base.DRAWABLE, x, y base.INT16, text string) {
 	cell := 8 * w.scale
 	for i, ch := range text {
