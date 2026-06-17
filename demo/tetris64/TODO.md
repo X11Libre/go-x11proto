@@ -5,3 +5,4 @@
 [ ] FHD mono theme still looking blurred
 [ ] UHD4K mono theme still looking blurred
 [ ] WQHD mono theme still looking blurred
+[ ] 300 color theme still not colored
