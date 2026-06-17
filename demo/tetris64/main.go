@@ -70,15 +70,17 @@ type resLayout struct {
 	nx, ny               int
 	scoreX, scoreY       int
 	linesX, linesY       int
-	levelX, levelY       int
+	adv                  int // digit advance / cell width (narrower than 8*scale)
 	gameOverX, gameOverY int
 }
 
+// Score/lines/next positions measured from the original FHD screenshots
+// (assets/screenshots) and expressed per resolution (≈ C64-space coord * scale).
 var layouts = []resLayout{
-	{cell: 8, bx: 120, by: 16, nx: 208, ny: 112, scoreX: 245, scoreY: 13, linesX: 245, linesY: 22, levelX: 248, levelY: 40, gameOverX: 120, gameOverY: 88},
-	{cell: 42, bx: 755, by: 99, nx: 1248, ny: 605, scoreX: 1470, scoreY: 70, linesX: 1470, linesY: 119, levelX: 1488, levelY: 216, gameOverX: 720, gameOverY: 475},
-	{cell: 55, bx: 1010, by: 143, nx: 1664, ny: 806, scoreX: 1960, scoreY: 93, linesX: 1960, linesY: 158, levelX: 1984, levelY: 288, gameOverX: 960, gameOverY: 633},
-	{cell: 83, bx: 1513, by: 212, nx: 2496, ny: 1209, scoreX: 2940, scoreY: 140, linesX: 2940, linesY: 237, levelX: 2976, levelY: 432, gameOverX: 1440, gameOverY: 950},
+	{cell: 8, bx: 120, by: 16, nx: 233, ny: 29, scoreX: 266, scoreY: 13, linesX: 272, linesY: 22, adv: 8, gameOverX: 120, gameOverY: 88},
+	{cell: 42, bx: 755, by: 99, nx: 1398, ny: 174, scoreX: 1475, scoreY: 70, linesX: 1545, linesY: 119, adv: 48, gameOverX: 720, gameOverY: 475},
+	{cell: 55, bx: 1010, by: 143, nx: 1864, ny: 232, scoreX: 2023, scoreY: 94, linesX: 2080, linesY: 159, adv: 64, gameOverX: 960, gameOverY: 633},
+	{cell: 83, bx: 1513, by: 212, nx: 2796, ny: 348, scoreX: 3034, scoreY: 141, linesX: 3125, linesY: 238, adv: 96, gameOverX: 1440, gameOverY: 950},
 }
 
 type TetrisWin struct {
@@ -421,8 +423,8 @@ func (w *TetrisWin) drawGame() {
 
 	// clear score/lines text areas
 	w.fillRects(w.bgWin, w.gcBlack, []base.Rectangle{
-		{X: base.INT16(l.scoreX), Y: base.INT16(l.scoreY), Width: base.CARD16(48 * fs), Height: base.CARD16(8 * fs)},
-		{X: base.INT16(l.linesX), Y: base.INT16(l.linesY), Width: base.CARD16(24 * fs), Height: base.CARD16(8 * fs)},
+		{X: base.INT16(l.scoreX), Y: base.INT16(l.scoreY), Width: base.CARD16(5 * l.adv), Height: base.CARD16(8 * fs)},
+		{X: base.INT16(l.linesX), Y: base.INT16(l.linesY), Width: base.CARD16(3 * l.adv), Height: base.CARD16(8 * fs)},
 	})
 
 	// draw board cells (relative to boardWin)
@@ -528,7 +530,7 @@ func (w *TetrisWin) drawGame() {
 	bgDraw := tk_core.Drawable{Conn: w.tkConn, XID: w.bgWin}
 
 	// score/lines/level use the greyscale digit pixmaps (scaled from masters)
-	w.drawNumber(w.bgWin, base.INT16(l.scoreX), base.INT16(l.scoreY), fmt.Sprintf("%06d", gs.Score))
+	w.drawNumber(w.bgWin, base.INT16(l.scoreX), base.INT16(l.scoreY), fmt.Sprintf("%05d", gs.Score))
 	w.drawNumber(w.bgWin, base.INT16(l.linesX), base.INT16(l.linesY), fmt.Sprintf("%03d", gs.Lines))
 
 	if gs.GameOver {

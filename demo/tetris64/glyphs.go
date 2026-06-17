@@ -61,7 +61,7 @@ func glyphTintColor() [3]byte {
 func sampleGlyphTint(img *xpm.Image, l resLayout, scale int) [3]byte {
 	x0, y0 := l.scoreX, l.scoreY
 	x1 := l.scoreX + 8*8*scale
-	y1 := l.levelY + 8*scale
+	y1 := l.linesY + 8*scale
 	if x0 < 0 {
 		x0 = 0
 	}
@@ -144,26 +144,57 @@ func (w *TetrisWin) buildDigitPixmaps() {
 			w.digitPix[d] = 0
 		}
 	}
-	cell := 8 * w.scale
+	cw := w.layout.adv // cell width = digit advance (matches the original spacing)
+	ch := 8 * w.scale  // cell height
+	gh := 7 * w.scale  // glyph height (7 C64 rows)
 	for d := 0; d < 10; d++ {
 		m := glyphMasters[d]
 		if m == nil {
 			w.digitPix[d] = 0
 			continue
 		}
+		// content bounding box from the alpha channel
 		mb := m.Bounds()
-		mw, mh := mb.Dx(), mb.Dy()
-		px := make([]byte, cell*cell*4)
+		minx, miny, maxx, maxy := mb.Max.X, mb.Max.Y, mb.Min.X-1, mb.Min.Y-1
+		for y := mb.Min.Y; y < mb.Max.Y; y++ {
+			for x := mb.Min.X; x < mb.Max.X; x++ {
+				if _, _, _, a := m.At(x, y).RGBA(); a>>8 >= 16 {
+					if x < minx {
+						minx = x
+					}
+					if y < miny {
+						miny = y
+					}
+					if x > maxx {
+						maxx = x
+					}
+					if y > maxy {
+						maxy = y
+					}
+				}
+			}
+		}
+		if maxx < minx {
+			w.digitPix[d] = 0
+			continue
+		}
+		bw, bh := maxx-minx+1, maxy-miny+1
+		gw := bw * gh / bh // preserve aspect (so '4' stays a touch wider)
+		if gw > cw {
+			gw = cw
+		}
+		xoff := (cw - gw) / 2
+
+		px := make([]byte, cw*ch*4)
 		for i := 3; i < len(px); i += 4 {
 			px[i] = 0xFF // opaque black background
 		}
-		for ty := 0; ty < cell; ty++ {
-			for tx := 0; tx < cell; tx++ {
-				// source region of the master covered by this cell pixel
-				sx0 := tx * mw / cell
-				sx1 := (tx + 1) * mw / cell
-				sy0 := ty * mh / cell
-				sy1 := (ty + 1) * mh / cell
+		for ty := 0; ty < gh; ty++ {
+			for tx := 0; tx < gw; tx++ {
+				sx0 := minx + tx*bw/gw
+				sx1 := minx + (tx+1)*bw/gw
+				sy0 := miny + ty*bh/gh
+				sy1 := miny + (ty+1)*bh/gh
 				if sx1 <= sx0 {
 					sx1 = sx0 + 1
 				}
@@ -173,7 +204,7 @@ func (w *TetrisWin) buildDigitPixmaps() {
 				var sa, n int
 				for yy := sy0; yy < sy1; yy++ {
 					for xx := sx0; xx < sx1; xx++ {
-						_, _, _, a := m.At(mb.Min.X+xx, mb.Min.Y+yy).RGBA()
+						_, _, _, a := m.At(xx, yy).RGBA()
 						sa += int(a >> 8)
 						n++
 					}
@@ -182,14 +213,14 @@ func (w *TetrisWin) buildDigitPixmaps() {
 					n = 1
 				}
 				cov := sa / n // averaged alpha = glyph coverage
-				o := (ty*cell + tx) * 4
+				o := ((ty)*cw + xoff + tx) * 4
 				px[o] = tintByte(w.glyphTint[0], cov)
 				px[o+1] = tintByte(w.glyphTint[1], cov)
 				px[o+2] = tintByte(w.glyphTint[2], cov)
 				px[o+3] = 0xFF
 			}
 		}
-		img := &xpm.Image{Width: cell, Height: cell, Data: px}
+		img := &xpm.Image{Width: cw, Height: ch, Data: px}
 		pm, err := img.Upload(w.conn, w.conn.DefaultRoot())
 		if err != nil {
 			w.digitPix[d] = 0
@@ -202,17 +233,18 @@ func (w *TetrisWin) buildDigitPixmaps() {
 // drawNumber blits the digit pixmaps for text onto target, advancing one
 // fixed-width cell (8*scale) per character.
 func (w *TetrisWin) drawNumber(target base.DRAWABLE, x, y base.INT16, text string) {
-	cell := 8 * w.scale
-	for i, ch := range text {
-		if ch < '0' || ch > '9' {
+	adv := w.layout.adv
+	ch := 8 * w.scale
+	for i, c := range text {
+		if c < '0' || c > '9' {
 			continue
 		}
-		pm := w.digitPix[ch-'0']
+		pm := w.digitPix[c-'0']
 		if pm == 0 {
 			continue
 		}
 		rpc.CopyArea(w.conn, pm, target, w.gcText,
-			0, 0, x+base.INT16(i*cell), y,
-			base.CARD16(cell), base.CARD16(cell))
+			0, 0, x+base.INT16(i*adv), y,
+			base.CARD16(adv), base.CARD16(ch))
 	}
 }
