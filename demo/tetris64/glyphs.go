@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
-	"github.com/X11Libre/go-x11proto/proto/core/opcode"
+	"github.com/X11Libre/go-x11proto/proto/rpc"
 	"github.com/X11Libre/go-x11proto/tk/xpm"
 )
 
@@ -182,7 +182,7 @@ func (w *TetrisWin) buildDigitPixmaps() {
 	// release any pixmaps from a previous resolution
 	for d := range w.digitPix {
 		if w.digitPix[d] != 0 {
-			w.conn.Send(&freePixmapReq{pixmap: w.digitPix[d]})
+			rpc.FreePixmap(w.conn, w.digitPix[d])
 			w.digitPix[d] = 0
 		}
 	}
@@ -265,44 +265,8 @@ func (w *TetrisWin) drawNumber(target base.DRAWABLE, x, y base.INT16, text strin
 		if pm == 0 {
 			continue
 		}
-		w.conn.Send(&copyAreaReq{
-			src: pm, dst: target, gc: w.gcText,
-			dstX:   x + base.INT16(i*cell),
-			dstY:   y,
-			width:  base.CARD16(cell),
-			height: base.CARD16(cell),
-		})
+		rpc.CopyArea(w.conn, pm, target, w.gcText,
+			0, 0, x+base.INT16(i*cell), y,
+			base.CARD16(cell), base.CARD16(cell))
 	}
-}
-
-// ---- raw CopyArea request (no rpc helper exists) ----
-
-type copyAreaReq struct {
-	src, dst       base.DRAWABLE
-	gc             base.GC
-	srcX, srcY     base.INT16
-	dstX, dstY     base.INT16
-	width, height  base.CARD16
-}
-
-func (r *copyAreaReq) WriteInto(wr *base.RequestWriter) error {
-	wr.SetOpcode(opcode.CopyArea)
-	wr.WriteCARD32(base.CARD32(r.src))
-	wr.WriteCARD32(base.CARD32(r.dst))
-	wr.WriteCARD32(base.CARD32(r.gc))
-	wr.WriteINT16(r.srcX)
-	wr.WriteINT16(r.srcY)
-	wr.WriteINT16(r.dstX)
-	wr.WriteINT16(r.dstY)
-	wr.WriteCARD16(r.width)
-	wr.WriteCARD16(r.height)
-	return nil
-}
-
-type freePixmapReq struct{ pixmap base.PIXMAP }
-
-func (r *freePixmapReq) WriteInto(wr *base.RequestWriter) error {
-	wr.SetOpcode(opcode.FreePixmap)
-	wr.WriteCARD32(base.CARD32(r.pixmap))
-	return nil
 }
