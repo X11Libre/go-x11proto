@@ -33,7 +33,7 @@ var frame320PNG []byte
 //go:embed assets/color/320/loader.png
 var loader320PNG []byte
 
-//go:embed assets/tetris.sid
+//go:embed assets/music/tetris.sid
 var sidData []byte
 
 // theme selects the asset set; combined with the resolution name it forms the
@@ -48,6 +48,7 @@ const (
 )
 
 var curState = stateIntro
+var paused bool
 var gs *game.State
 
 type resOpt struct {
@@ -418,11 +419,10 @@ func (w *TetrisWin) drawGame() {
 		Width: base.CARD16(4 * l.cell), Height: base.CARD16(4 * l.cell),
 	}})
 
-	// clear score/lines/level text areas
+	// clear score/lines text areas
 	w.fillRects(w.bgWin, w.gcBlack, []base.Rectangle{
 		{X: base.INT16(l.scoreX), Y: base.INT16(l.scoreY), Width: base.CARD16(48 * fs), Height: base.CARD16(8 * fs)},
 		{X: base.INT16(l.linesX), Y: base.INT16(l.linesY), Width: base.CARD16(24 * fs), Height: base.CARD16(8 * fs)},
-		{X: base.INT16(l.levelX), Y: base.INT16(l.levelY), Width: base.CARD16(16 * fs), Height: base.CARD16(8 * fs)},
 	})
 
 	// draw board cells (relative to boardWin)
@@ -449,6 +449,10 @@ func (w *TetrisWin) drawGame() {
 	if w.showGhost && dist > 0 {
 		p := gs.Current
 		_, ghost := w.gcCol(uint8(p.Type))
+		bt := l.cell / 8 // outline thickness
+		if bt < 1 {
+			bt = 1
+		}
 		var rects []base.Rectangle
 		for y := 0; y < 4; y++ {
 			for x := 0; x < 4; x++ {
@@ -460,10 +464,17 @@ func (w *TetrisWin) drawGame() {
 				if by < 0 {
 					continue
 				}
-				rects = append(rects, base.Rectangle{
-					X: base.INT16(bx * l.cell), Y: base.INT16(by * l.cell),
-					Width: base.CARD16(l.cell), Height: base.CARD16(l.cell),
-				})
+				px := base.INT16(bx * l.cell)
+				py := base.INT16(by * l.cell)
+				c := base.CARD16(l.cell)
+				t := base.CARD16(bt)
+				// draw each landing cell as an outline (grid) instead of a fill
+				rects = append(rects,
+					base.Rectangle{X: px, Y: py, Width: c, Height: t},                              // top
+					base.Rectangle{X: px, Y: py + base.INT16(l.cell-bt), Width: c, Height: t},       // bottom
+					base.Rectangle{X: px, Y: py, Width: t, Height: c},                               // left
+					base.Rectangle{X: px + base.INT16(l.cell-bt), Y: py, Width: t, Height: c},       // right
+				)
 			}
 		}
 		w.fillRects(w.boardWin, ghost, rects)
@@ -519,11 +530,23 @@ func (w *TetrisWin) drawGame() {
 	// score/lines/level use the greyscale digit pixmaps (scaled from masters)
 	w.drawNumber(w.bgWin, base.INT16(l.scoreX), base.INT16(l.scoreY), fmt.Sprintf("%06d", gs.Score))
 	w.drawNumber(w.bgWin, base.INT16(l.linesX), base.INT16(l.linesY), fmt.Sprintf("%03d", gs.Lines))
-	w.drawNumber(w.bgWin, base.INT16(l.levelX), base.INT16(l.levelY), fmt.Sprintf("%02d", gs.Level))
 
 	if gs.GameOver {
 		tetris_font.DrawString(bgDraw, w.gcText,
 			base.INT16(l.gameOverX), base.INT16(l.gameOverY), fs, "GAME OVER")
+	}
+
+	if paused {
+		// overlay "PAUSE" centred on the board (boardWin sits on top)
+		boardDraw := tk_core.Drawable{Conn: w.tkConn, XID: w.boardWin}
+		const msg = "PAUSE"
+		tw := len(msg) * 8 * fs
+		px := (10*l.cell - tw) / 2
+		py := 10*l.cell - 4*fs
+		w.fillRects(w.boardWin, w.gcBlack, []base.Rectangle{
+			{X: base.INT16(px - fs), Y: base.INT16(py - fs), Width: base.CARD16(tw + 2*fs), Height: base.CARD16(8*fs + 2*fs)},
+		})
+		tetris_font.DrawString(boardDraw, w.gcText, base.INT16(px), base.INT16(py), fs, msg)
 	}
 
 	if w.showHelp {
@@ -646,6 +669,9 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 			w.showGhost = !w.showGhost
 			w.drawGame()
 			return true
+		case 54: // c / C - switch colour <-> mono theme
+			w.toggleTheme()
+			return true
 		case 35, 86, 21: // + (German main/KP, US =/+)
 			w.cycleRes(+1)
 			return true
@@ -656,6 +682,7 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 
 		if curState == stateIntro {
 			curState = statePlaying
+			paused = false
 			gs = game.New()
 			rpc.SetWindowBackgroundPixmap(w.conn, w.bgWin, w.bg)
 			rpc.ClearArea(w.conn, w.bgWin, 0, 0, 0, 0, false)
@@ -666,22 +693,35 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 
 		if e.Detail == 36 && gs.GameOver { // Return - restart after game over
 			gs.Reset()
+			paused = false
 			w.drawGame()
 			return true
 		}
 
 		if !gs.GameOver {
 			switch e.Detail {
+			case 65: // space - pause / resume
+				paused = !paused
 			case 113, 104: // left, h
-				gs.MoveLeft()
+				if !paused {
+					gs.MoveLeft()
+				}
 			case 114, 108: // right, l
-				gs.MoveRight()
+				if !paused {
+					gs.MoveRight()
+				}
 			case 116, 106: // down, j
-				gs.MoveDown()
+				if !paused {
+					gs.MoveDown()
+				}
 			case 111, 107: // up, k
-				gs.Rotate()
-			case 65, 36: // space, Return - hard drop
-				gs.HardDrop()
+				if !paused {
+					gs.Rotate()
+				}
+			case 36: // Return - hard drop
+				if !paused {
+					gs.HardDrop()
+				}
 			}
 			w.drawGame()
 		}
@@ -689,10 +729,9 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 	return true
 }
 
-func (w *TetrisWin) cycleRes(dir int) {
-	n := len(resolutions)
-	w.resIdx = (w.resIdx + dir + n) % n
-
+// recreateWindows tears down and rebuilds the windows for the current
+// resolution/theme, reloading the backgrounds and rescaling the glyphs.
+func (w *TetrisWin) recreateWindows() {
 	screen := w.conn.Setup.Screens[0]
 	screenW := int(screen.Width)
 	screenH := int(screen.Height)
@@ -718,6 +757,22 @@ func (w *TetrisWin) cycleRes(dir int) {
 		rpc.ClearArea(w.conn, w.bgWin, 0, 0, 0, 0, false)
 		w.drawGame()
 	}
+}
+
+func (w *TetrisWin) cycleRes(dir int) {
+	n := len(resolutions)
+	w.resIdx = (w.resIdx + dir + n) % n
+	w.recreateWindows()
+}
+
+func (w *TetrisWin) toggleTheme() {
+	if theme == "color" {
+		theme = "mono"
+	} else {
+		theme = "color"
+	}
+	cachedGlyphTint = nil // re-sample the digit colour from the new theme's art
+	w.recreateWindows()
 }
 
 // ---- SID music ----
@@ -770,7 +825,7 @@ func gameLoop(conn *proto_core.X11Conn, win *TetrisWin) {
 		case ev := <-conn.Events():
 			conn.DeliverWindowEvent(ev)
 		case <-time.After(16 * time.Millisecond):
-			if curState != statePlaying || gs.GameOver {
+			if curState != statePlaying || gs.GameOver || paused {
 				continue
 			}
 			speed := time.Duration(gs.TickSpeed()) * time.Millisecond
