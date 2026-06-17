@@ -70,6 +70,7 @@ type resLayout struct {
 	nx, ny               int
 	scoreX, scoreY       int
 	linesX, linesY       int
+	numRight             int // right edge the score/lines numbers are aligned to
 	adv                  int // digit advance / cell width (narrower than 8*scale)
 	gameOverX, gameOverY int
 }
@@ -77,10 +78,10 @@ type resLayout struct {
 // Score/lines/next positions measured from the original FHD screenshots
 // (assets/screenshots) and expressed per resolution (≈ C64-space coord * scale).
 var layouts = []resLayout{
-	{cell: 8, bx: 120, by: 16, nx: 233, ny: 29, scoreX: 266, scoreY: 13, linesX: 272, linesY: 22, adv: 8, gameOverX: 120, gameOverY: 88},
-	{cell: 42, bx: 755, by: 99, nx: 1398, ny: 174, scoreX: 1475, scoreY: 70, linesX: 1545, linesY: 119, adv: 48, gameOverX: 720, gameOverY: 475},
-	{cell: 55, bx: 1010, by: 143, nx: 1864, ny: 232, scoreX: 2023, scoreY: 94, linesX: 2080, linesY: 159, adv: 64, gameOverX: 960, gameOverY: 633},
-	{cell: 83, bx: 1513, by: 212, nx: 2796, ny: 348, scoreX: 3034, scoreY: 141, linesX: 3125, linesY: 238, adv: 96, gameOverX: 1440, gameOverY: 950},
+	{cell: 8, bx: 120, by: 16, nx: 233, ny: 29, scoreX: 266, scoreY: 13, linesX: 272, linesY: 22, numRight: 310, adv: 8, gameOverX: 120, gameOverY: 88},
+	{cell: 42, bx: 755, by: 99, nx: 1398, ny: 174, scoreX: 1475, scoreY: 70, linesX: 1545, linesY: 119, numRight: 1739, adv: 48, gameOverX: 720, gameOverY: 475},
+	{cell: 55, bx: 1010, by: 143, nx: 1864, ny: 232, scoreX: 2023, scoreY: 94, linesX: 2080, linesY: 159, numRight: 2375, adv: 64, gameOverX: 960, gameOverY: 633},
+	{cell: 83, bx: 1513, by: 212, nx: 2796, ny: 348, scoreX: 3034, scoreY: 141, linesX: 3125, linesY: 238, numRight: 3562, adv: 96, gameOverX: 1440, gameOverY: 950},
 }
 
 type TetrisWin struct {
@@ -388,21 +389,28 @@ func pieceBounds(p game.Piece) (minX, minY, maxX, maxY int) {
 func (w *TetrisWin) drawIntro() {
 	rpc.SetWindowBackgroundPixmap(w.conn, w.bgWin, w.loaderBg)
 	rpc.ClearArea(w.conn, w.bgWin, 0, 0, 0, 0, false)
+	if w.showHelp {
+		w.drawHelp()
+	}
 }
 
-func (w *TetrisWin) drawGame() {
+// ensureGCs lazily creates the black + washed-out-grey GCs used for text and
+// fills (the grey #BABABA matches the original C64 readout, not stark white).
+func (w *TetrisWin) ensureGCs() {
 	if w.gcBlack.Invalid() {
 		gcid, err := rpc.CreateGC1(w.conn, 0x000000, 0x000000, 0)
 		errPanic(err, "CreateGC1 black")
 		w.gcBlack = gcid
 	}
 	if w.gcText.Invalid() {
-		// washed-out light gray (C64 light-gray, #BABABA) of the original
-		// score/lines/level readout — not stark white, to match the artwork.
 		gcid, err := rpc.CreateGC1(w.conn, 0xBABABA, 0x000000, 0)
 		errPanic(err, "CreateGC1 text")
 		w.gcText = gcid
 	}
+}
+
+func (w *TetrisWin) drawGame() {
+	w.ensureGCs()
 
 	fs := w.scale
 	l := w.layout
@@ -421,10 +429,10 @@ func (w *TetrisWin) drawGame() {
 		Width: base.CARD16(4 * l.cell), Height: base.CARD16(4 * l.cell),
 	}})
 
-	// clear score/lines text areas
+	// clear score/lines text areas (from the baked number's left edge to numRight)
 	w.fillRects(w.bgWin, w.gcBlack, []base.Rectangle{
-		{X: base.INT16(l.scoreX), Y: base.INT16(l.scoreY), Width: base.CARD16(5 * l.adv), Height: base.CARD16(8 * fs)},
-		{X: base.INT16(l.linesX), Y: base.INT16(l.linesY), Width: base.CARD16(3 * l.adv), Height: base.CARD16(8 * fs)},
+		{X: base.INT16(l.scoreX), Y: base.INT16(l.scoreY), Width: base.CARD16(l.numRight - l.scoreX), Height: base.CARD16(8 * fs)},
+		{X: base.INT16(l.linesX), Y: base.INT16(l.linesY), Width: base.CARD16(l.numRight - l.linesX), Height: base.CARD16(8 * fs)},
 	})
 
 	// draw board cells (relative to boardWin)
@@ -530,8 +538,11 @@ func (w *TetrisWin) drawGame() {
 	bgDraw := tk_core.Drawable{Conn: w.tkConn, XID: w.bgWin}
 
 	// score/lines/level use the greyscale digit pixmaps (scaled from masters)
-	w.drawNumber(w.bgWin, base.INT16(l.scoreX), base.INT16(l.scoreY), fmt.Sprintf("%05d", gs.Score))
-	w.drawNumber(w.bgWin, base.INT16(l.linesX), base.INT16(l.linesY), fmt.Sprintf("%03d", gs.Lines))
+	// right-align the numbers to numRight
+	scoreStr := fmt.Sprintf("%05d", gs.Score)
+	linesStr := fmt.Sprintf("%03d", gs.Lines)
+	w.drawNumber(w.bgWin, base.INT16(l.numRight-len(scoreStr)*l.adv), base.INT16(l.scoreY), scoreStr)
+	w.drawNumber(w.bgWin, base.INT16(l.numRight-len(linesStr)*l.adv), base.INT16(l.linesY), linesStr)
 
 	if gs.GameOver {
 		tetris_font.DrawString(bgDraw, w.gcText,
@@ -552,53 +563,66 @@ func (w *TetrisWin) drawGame() {
 	}
 
 	if w.showHelp {
-		res := resolutions[w.resIdx]
-		hx := 40 * res.w / 320
-		hy := 24 * res.h / 200
-		hbw := res.w - 2*hx
-		hbh := res.h - 2*hy
-
-		w.fillRects(w.bgWin, w.gcBlack, []base.Rectangle{
-			{X: base.INT16(hx + 1), Y: base.INT16(hy + 1), Width: base.CARD16(hbw - 2), Height: base.CARD16(hbh - 2)},
-		})
-		w.fillRects(w.bgWin, w.gcText, []base.Rectangle{
-			{X: base.INT16(hx), Y: base.INT16(hy), Width: base.CARD16(hbw), Height: 1},
-			{X: base.INT16(hx), Y: base.INT16(hy + hbh), Width: base.CARD16(hbw), Height: 1},
-			{X: base.INT16(hx), Y: base.INT16(hy), Width: 1, Height: base.CARD16(hbh)},
-			{X: base.INT16(hx + hbw), Y: base.INT16(hy), Width: 1, Height: base.CARD16(hbh)},
-		})
-
-		titleX := (res.w - 4*8*fs) / 2
-		tetris_font.DrawString(bgDraw, w.gcText,
-			base.INT16(titleX), base.INT16(hy+12*res.h/200), fs, "HELP")
-		sepY := hy + 20*res.h/200
-		w.fillRects(w.bgWin, w.gcText, []base.Rectangle{
-			{X: base.INT16(hx + 16), Y: base.INT16(sepY), Width: base.CARD16(hbw - 32), Height: 1},
-		})
-
-		helpLines := []struct {
-			y    int
-			k, a string
-		}{
-			{32, "ARROWS/WASD  Move", ""},
-			{40, "DOWN / J      Soft drop", ""},
-			{48, "UP / K        Rotate", ""},
-			{56, "SPACE         Hard drop", ""},
-			{64, "+ / -         Resolution", ""},
-			{72, "F             Fullscreen", ""},
-			{80, "G             Toggle ghost", ""},
-			{88, "Q             Quit", ""},
-		}
-		for _, hl := range helpLines {
-			yy := hy + hl.y*res.h/200
-			tetris_font.DrawString(bgDraw, w.gcText,
-				base.INT16(hx+16*res.w/320), base.INT16(yy), fs, hl.k)
-		}
-
-		closeX := (res.w - 20*8*fs) / 2
-		tetris_font.DrawString(bgDraw, w.gcText,
-			base.INT16(closeX), base.INT16(hy+112*res.h/200), fs, "PRESS F1 TO CLOSE")
+		w.drawHelp()
 	}
+}
+
+// drawHelp draws the help overlay (controls) on bgWin, framed with a border in
+// the style of the play-field border. Used from both the loader and the game.
+func (w *TetrisWin) drawHelp() {
+	w.ensureGCs()
+	res := resolutions[w.resIdx]
+	fs := w.scale
+	bgDraw := tk_core.Drawable{Conn: w.tkConn, XID: w.bgWin}
+	hx := 40 * res.w / 320
+	hy := 24 * res.h / 200
+	hbw := res.w - 2*hx
+	hbh := res.h - 2*hy
+	bt := fs // border thickness (like the well border)
+	if bt < 2 {
+		bt = 2
+	}
+
+	// dark interior + light border
+	w.fillRects(w.bgWin, w.gcBlack, []base.Rectangle{
+		{X: base.INT16(hx), Y: base.INT16(hy), Width: base.CARD16(hbw), Height: base.CARD16(hbh)},
+	})
+	w.fillRects(w.bgWin, w.gcText, []base.Rectangle{
+		{X: base.INT16(hx), Y: base.INT16(hy), Width: base.CARD16(hbw), Height: base.CARD16(bt)},
+		{X: base.INT16(hx), Y: base.INT16(hy + hbh - bt), Width: base.CARD16(hbw), Height: base.CARD16(bt)},
+		{X: base.INT16(hx), Y: base.INT16(hy), Width: base.CARD16(bt), Height: base.CARD16(hbh)},
+		{X: base.INT16(hx + hbw - bt), Y: base.INT16(hy), Width: base.CARD16(bt), Height: base.CARD16(hbh)},
+	})
+
+	titleX := (res.w - 4*8*fs) / 2
+	tetris_font.DrawString(bgDraw, w.gcText,
+		base.INT16(titleX), base.INT16(hy+12*res.h/200), fs, "HELP")
+	sepY := hy + 20*res.h/200
+	w.fillRects(w.bgWin, w.gcText, []base.Rectangle{
+		{X: base.INT16(hx + 16*res.w/320), Y: base.INT16(sepY), Width: base.CARD16(hbw - 32*res.w/320), Height: base.CARD16(bt)},
+	})
+
+	helpLines := []string{
+		"ARROWS/WASD  MOVE",
+		"DOWN / J     SOFT DROP",
+		"UP / K       ROTATE",
+		"ENTER        HARD DROP",
+		"SPACE        PAUSE",
+		"C            COLOR/MONO",
+		"G            GHOST",
+		"F            FULLSCREEN",
+		"+ / -        RESOLUTION",
+		"Q            QUIT",
+	}
+	for i, line := range helpLines {
+		yy := hy + (30+i*10)*res.h/200
+		tetris_font.DrawString(bgDraw, w.gcText,
+			base.INT16(hx+16*res.w/320), base.INT16(yy), fs, line)
+	}
+
+	closeX := (res.w - 17*8*fs) / 2
+	tetris_font.DrawString(bgDraw, w.gcText,
+		base.INT16(closeX), base.INT16(hy+138*res.h/200), fs, "PRESS F1 TO CLOSE")
 }
 
 // ---- event handler ----
@@ -663,9 +687,21 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 		case 41: // f / F
 			w.toggleFullscreen()
 			return true
-		case 67: // F1
+		case 67: // F1 - toggle help (pauses the game); works in loader and game
 			w.showHelp = !w.showHelp
-			w.drawGame()
+			if curState == statePlaying {
+				if w.showHelp {
+					// hide the board so the help overlay isn't occluded by it
+					rpc.UnmapWindow(w.conn, w.boardWin)
+				} else {
+					// restore: show board again and repaint the bg to wipe the help
+					rpc.MapWindow(w.conn, w.boardWin)
+					rpc.ClearArea(w.conn, w.bgWin, 0, 0, 0, 0, false)
+				}
+				w.drawGame()
+			} else {
+				w.drawIntro() // drawIntro repaints the loader (wipes the help)
+			}
 			return true
 		case 42: // g / G
 			w.showGhost = !w.showGhost
@@ -679,6 +715,11 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 			return true
 		case 61, 82, 20: // - (German main/KP, US -/_)
 			w.cycleRes(-1)
+			return true
+		}
+
+		// while the help page is open the game is paused: ignore everything else
+		if w.showHelp {
 			return true
 		}
 
@@ -827,7 +868,7 @@ func gameLoop(conn *proto_core.X11Conn, win *TetrisWin) {
 		case ev := <-conn.Events():
 			conn.DeliverWindowEvent(ev)
 		case <-time.After(16 * time.Millisecond):
-			if curState != statePlaying || gs.GameOver || paused {
+			if curState != statePlaying || gs.GameOver || paused || win.showHelp {
 				continue
 			}
 			speed := time.Duration(gs.TickSpeed()) * time.Millisecond
