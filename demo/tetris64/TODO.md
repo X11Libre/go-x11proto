@@ -8,3 +8,4 @@
 [ ] WQHD mono theme still looking blurred
 [ ] 300 color theme still not colored
 [ ] theme: move .sid file under music subdir
+[ ] when resource embedding is enabled: also embed the .sid file and write it out to tempfile for sidplayfp
