@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image"
 	"image/png"
-	"os"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/rpc"
@@ -108,20 +107,13 @@ func sampleGlyphTint(img *xpm.Image, l resLayout, scale int) [3]byte {
 	return [3]byte{byte(sr / n), byte(sg / n), byte(sb / n)}
 }
 
-// loadGlyphMasters decodes the 0..9 master PNGs once. On-disk files (editable
-// without a rebuild) take precedence over the embedded copies.
+// loadGlyphMasters decodes the 0..9 embedded master PNGs once.
 func loadGlyphMasters() {
 	for d := 0; d < 10; d++ {
 		if glyphMasters[d] != nil {
 			continue
 		}
-		var data []byte
-		if p := assetPathFor(fmt.Sprintf("glyph-masters/%d.png", d)); p != "" {
-			data, _ = os.ReadFile(p)
-		}
-		if data == nil {
-			data, _ = glyphMastersFS.ReadFile(fmt.Sprintf("assets/glyph-masters/%d.png", d))
-		}
+		data, _ := glyphMastersFS.ReadFile(fmt.Sprintf("assets/glyph-masters/%d.png", d))
 		if data == nil {
 			continue
 		}

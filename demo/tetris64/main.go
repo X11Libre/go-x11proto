@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	_ "embed"
+	"embed"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -27,14 +27,11 @@ import (
 	"github.com/X11Libre/go-x11proto/tk/xpm"
 )
 
-// Embedded fallback (used when the on-disk asset for the active theme/resolution
-// is missing): the FHD colour frame/loader, the smallest theme we ship.
+// All background art is compiled into the binary: both themes, every
+// resolution (the screenshots/ reference dir is intentionally left out).
 //
-//go:embed assets/color/FHD/frame.png
-var frameFallbackPNG []byte
-
-//go:embed assets/color/FHD/loader.png
-var loaderFallbackPNG []byte
+//go:embed assets/color assets/mono
+var bgFS embed.FS
 
 //go:embed assets/music/tetris.sid
 var sidData []byte
@@ -94,7 +91,7 @@ type TetrisWin struct {
 	bgWin    base.WINDOW    // child of frame, holds bg pixmap, centered
 	boardWin base.WINDOW    // child of bgWin, holds board rendering
 
-	gcText  base.GC
+	gcText   base.GC
 	gcBlack  base.GC
 	gcColors map[uint8]base.GC
 	gcGhost  map[uint8]base.GC
@@ -127,52 +124,16 @@ func errPanic(e error, s string) {
 
 // ---- asset helpers ----
 
-func assetPathFor(name string) string {
-	var candidates []string
-	// Walk up from the working directory so the on-disk assets are found
-	// whether the program is launched from the repo root, from demo/tetris64,
-	// or any directory in between (lets edited PNGs take effect without a
-	// rebuild). Fall back to assets next to the executable.
-	if cwd, err := os.Getwd(); err == nil {
-		d := cwd
-		for i := 0; i < 8; i++ {
-			candidates = append(candidates,
-				filepath.Join(d, "demo/tetris64/assets", name),
-				filepath.Join(d, "assets", name))
-			parent := filepath.Dir(d)
-			if parent == d {
-				break
-			}
-			d = parent
-		}
-	}
-	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "assets", name))
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
+// loadFrame / loadLoader return the embedded background PNG for the current
+// theme and resolution.
 func loadFrame(resName string) []byte {
-	if p := assetPathFor(filepath.Join(theme, resName, "frame.png")); p != "" {
-		if d, err := os.ReadFile(p); err == nil {
-			return d
-		}
-	}
-	return frameFallbackPNG
+	d, _ := bgFS.ReadFile("assets/" + theme + "/" + resName + "/frame.png")
+	return d
 }
 
 func loadLoader(resName string) []byte {
-	if p := assetPathFor(filepath.Join(theme, resName, "loader.png")); p != "" {
-		if d, err := os.ReadFile(p); err == nil {
-			return d
-		}
-	}
-	return loaderFallbackPNG
+	d, _ := bgFS.ReadFile("assets/" + theme + "/" + resName + "/loader.png")
+	return d
 }
 
 func decodeImage(data []byte) (*xpm.Image, error) {
@@ -538,10 +499,10 @@ func (w *TetrisWin) drawGame() {
 				t := base.CARD16(bt)
 				// draw each landing cell as an outline (grid) instead of a fill
 				rects = append(rects,
-					base.Rectangle{X: px, Y: py, Width: c, Height: t},                              // top
-					base.Rectangle{X: px, Y: py + base.INT16(l.cell-bt), Width: c, Height: t},       // bottom
-					base.Rectangle{X: px, Y: py, Width: t, Height: c},                               // left
-					base.Rectangle{X: px + base.INT16(l.cell-bt), Y: py, Width: t, Height: c},       // right
+					base.Rectangle{X: px, Y: py, Width: c, Height: t},                         // top
+					base.Rectangle{X: px, Y: py + base.INT16(l.cell-bt), Width: c, Height: t}, // bottom
+					base.Rectangle{X: px, Y: py, Width: t, Height: c},                         // left
+					base.Rectangle{X: px + base.INT16(l.cell-bt), Y: py, Width: t, Height: c}, // right
 				)
 			}
 		}

@@ -9,9 +9,7 @@ rendered directly over the X11 wire protocol using `go-x11proto` (no Xlib).
 go run ./demo/tetris64
 ```
 
-Run it from the repository root so the on-disk assets under
-`demo/tetris64/assets/` are picked up. If they are not found, the program falls
-back to the embedded FHD colour frame.
+All assets are compiled into the binary, so it runs from any directory.
 
 ## Controls
 
@@ -32,8 +30,8 @@ back to the embedded FHD colour frame.
 ## Assets
 
 - Backgrounds live under `assets/<theme>/<res>/` (`frame.png`, `loader.png`),
-  for themes `color` and `mono` and resolutions `FHD`, `WQHD`, `UHD4K`.
-  They are uploaded once as server-side pixmaps.
+  for themes `color` and `mono` and resolutions `FHD`, `WQHD`, `UHD4K`. They are
+  embedded into the binary at build time and uploaded once as server-side pixmaps.
 - Score/lines digits come from greyscale master glyphs in
   `assets/glyph-masters/`, scaled per resolution and tinted to match the
   background's score text.
