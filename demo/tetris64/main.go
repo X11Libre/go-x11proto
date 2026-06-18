@@ -108,6 +108,8 @@ type TetrisWin struct {
 	frameW     int
 	frameH     int
 	fbW        int // framebuffer (8:5 background) width; border = (frameW-fbW)/2
+
+	music *sidplayer.Player
 }
 
 func errPanic(e error, s string) {
@@ -833,10 +835,6 @@ func (w *TetrisWin) toggleTheme() {
 	w.recreateWindows()
 }
 
-func cleanup() {
-	sidplayer.Stop()
-}
-
 // ---- game loop ----
 
 var doneCh = make(chan struct{})
@@ -882,7 +880,6 @@ func main() {
 	conn, err := proto.Dial("")
 	errPanic(err, "connecting")
 	defer conn.Close()
-	defer cleanup()
 
 	tkConn := tk_core.MakeTkConn(conn)
 
@@ -894,7 +891,9 @@ func main() {
 		conn:   conn,
 		tkConn: &tkConn,
 		resIdx: pickBestRes(screenW, screenH),
+		music:  sidplayer.New(),
 	}
+	defer win.music.Stop()
 	win.createWin(screenW, screenH)
 
 	// auto-fullscreen if chosen resolution is near screen size (WM struts would clip it)
@@ -903,7 +902,7 @@ func main() {
 	}
 
 	gs = game.New()
-	sidplayer.Start(sidData)
+	win.music.Start(sidData)
 
 	curState = stateIntro
 	gameLoop(conn, win)
