@@ -27,11 +27,14 @@ import (
 	"github.com/X11Libre/go-x11proto/tk/xpm"
 )
 
-//go:embed assets/color/320/frame.png
-var frame320PNG []byte
+// Embedded fallback (used when the on-disk asset for the active theme/resolution
+// is missing): the FHD colour frame/loader, the smallest theme we ship.
+//
+//go:embed assets/color/FHD/frame.png
+var frameFallbackPNG []byte
 
-//go:embed assets/color/320/loader.png
-var loader320PNG []byte
+//go:embed assets/color/FHD/loader.png
+var loaderFallbackPNG []byte
 
 //go:embed assets/music/tetris.sid
 var sidData []byte
@@ -58,7 +61,6 @@ type resOpt struct {
 }
 
 var resolutions = []resOpt{
-	{320, 200, 1, "320"},
 	{1920, 1080, 6, "FHD"},
 	{2560, 1440, 8, "WQHD"},
 	{3840, 2160, 12, "UHD4K"},
@@ -78,7 +80,6 @@ type resLayout struct {
 // Score/lines/next positions measured from the original FHD screenshots
 // (assets/screenshots) and expressed per resolution (≈ C64-space coord * scale).
 var layouts = []resLayout{
-	{cell: 8, bx: 120, by: 16, nx: 233, ny: 29, scoreX: 266, scoreY: 13, linesX: 272, linesY: 22, numRight: 310, adv: 8, gameOverX: 120, gameOverY: 88},
 	{cell: 42, bx: 755, by: 99, nx: 1398, ny: 174, scoreX: 1475, scoreY: 70, linesX: 1545, linesY: 119, numRight: 1739, adv: 48, gameOverX: 720, gameOverY: 475},
 	{cell: 55, bx: 1010, by: 143, nx: 1864, ny: 232, scoreX: 2023, scoreY: 94, linesX: 2080, linesY: 159, numRight: 2375, adv: 64, gameOverX: 960, gameOverY: 633},
 	{cell: 83, bx: 1513, by: 212, nx: 2796, ny: 348, scoreX: 3034, scoreY: 141, linesX: 3125, linesY: 238, numRight: 3562, adv: 96, gameOverX: 1440, gameOverY: 950},
@@ -96,6 +97,7 @@ type TetrisWin struct {
 	gcBlack  base.GC
 	gcColors map[uint8]base.GC
 	gcGhost  map[uint8]base.GC
+	gcShade  map[uint8]base.GC
 
 	bg       base.PIXMAP
 	loaderBg base.PIXMAP
@@ -159,7 +161,7 @@ func loadFrame(resName string) []byte {
 			return d
 		}
 	}
-	return frame320PNG
+	return frameFallbackPNG
 }
 
 func loadLoader(resName string) []byte {
@@ -168,7 +170,7 @@ func loadLoader(resName string) []byte {
 			return d
 		}
 	}
-	return loader320PNG
+	return loaderFallbackPNG
 }
 
 func decodeImage(data []byte) (*xpm.Image, error) {
@@ -337,6 +339,52 @@ func dimColor(rgba uint32) uint32 {
 	return (r << 16) | (g << 8) | b
 }
 
+// shadeColor darkens a colour to ~13/16 for the scanline rows that give the
+// stones the soft, slightly-striped look of the original CRT screenshots.
+func shadeColor(rgba uint32) uint32 {
+	r := ((rgba >> 16) & 0xFF) * 13 / 16
+	g := ((rgba >> 8) & 0xFF) * 13 / 16
+	b := (rgba & 0xFF) * 13 / 16
+	return (r << 16) | (g << 8) | b
+}
+
+func (w *TetrisWin) shadeGC(color uint8) base.GC {
+	if w.gcShade == nil {
+		w.gcShade = make(map[uint8]base.GC)
+	}
+	if g, ok := w.gcShade[color]; ok {
+		return g
+	}
+	rgba := game.PieceColors[game.PieceType(color)]
+	g, _ := rpc.CreateGC1(w.conn, base.CARD32(shadeColor(rgba)), 0x000000, 0)
+	w.gcShade[color] = g
+	return g
+}
+
+// scanlineRects returns the darker horizontal stripes (every other ~t rows)
+// for a set of cell rectangles, producing a subtle scanline texture.
+func (w *TetrisWin) scanlineRects(rects []base.Rectangle) []base.Rectangle {
+	t := w.scale / 4
+	if t < 1 {
+		t = 1
+	}
+	cell := w.layout.cell
+	var out []base.Rectangle
+	for _, r := range rects {
+		for yy := t; yy < cell; yy += 2 * t {
+			h := t
+			if yy+h > cell {
+				h = cell - yy
+			}
+			out = append(out, base.Rectangle{
+				X: r.X, Y: r.Y + base.INT16(yy),
+				Width: r.Width, Height: base.CARD16(h),
+			})
+		}
+	}
+	return out
+}
+
 func (w *TetrisWin) gcCol(color uint8) (full, ghost base.GC) {
 	if w.gcColors == nil {
 		w.gcColors = make(map[uint8]base.GC)
@@ -452,6 +500,7 @@ func (w *TetrisWin) drawGame() {
 	for c, rects := range byColor {
 		full, _ := w.gcCol(c)
 		w.fillRects(w.boardWin, full, rects)
+		w.fillRects(w.boardWin, w.shadeGC(c), w.scanlineRects(rects))
 	}
 
 	// ghost piece (relative to boardWin)
@@ -511,6 +560,7 @@ func (w *TetrisWin) drawGame() {
 		}
 	}
 	w.fillRects(w.boardWin, full, rects)
+	w.fillRects(w.boardWin, w.shadeGC(uint8(p.Type)), w.scanlineRects(rects))
 
 	// next piece preview (relative to bgWin)
 	next := game.NewPiece(gs.Next)
@@ -534,6 +584,7 @@ func (w *TetrisWin) drawGame() {
 		}
 	}
 	w.fillRects(w.bgWin, full, rectsN)
+	w.fillRects(w.bgWin, w.shadeGC(uint8(next.Type)), w.scanlineRects(rectsN))
 
 	bgDraw := tk_core.Drawable{Conn: w.tkConn, XID: w.bgWin}
 
@@ -603,7 +654,7 @@ func (w *TetrisWin) drawHelp() {
 	})
 
 	helpLines := []string{
-		"ARROWS/WASD  MOVE",
+		"ARROWS/HJKL  MOVE",
 		"DOWN / J     SOFT DROP",
 		"UP / K       ROTATE",
 		"ENTER        HARD DROP",

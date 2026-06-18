@@ -47,7 +47,7 @@ func glyphTintColor() [3]byte {
 		return *cachedGlyphTint
 	}
 	t := [3]byte{0xBA, 0xBA, 0xBA}
-	const fhd = 1 // index of the FHD resolution / layout
+	const fhd = 0 // index of the FHD resolution / layout
 	if img, err := decodeImage(loadFrame(resolutions[fhd].name)); err == nil {
 		t = sampleGlyphTint(img, layouts[fhd], resolutions[fhd].scale)
 	}
