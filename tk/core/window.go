@@ -79,6 +79,10 @@ func (w Window) Map() error {
 	return rpc.MapWindow(w.Conn.X11Conn, w.XID)
 }
 
+func (w Window) Unmap() error {
+	return rpc.UnmapWindow(w.Conn.X11Conn, w.XID)
+}
+
 func (w Window) SetName(n string) error {
 	w.Name = n
 	return rpc.SetWindowName(w.Conn.X11Conn, w.XID, n)
