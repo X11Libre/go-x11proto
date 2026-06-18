@@ -8,15 +8,11 @@ import (
 	"image"
 	"image/draw"
 	"image/png"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"syscall"
 	"time"
 
 	tetris_font "github.com/X11Libre/go-x11proto/demo/tetris64/font"
 	"github.com/X11Libre/go-x11proto/demo/tetris64/game"
+	"github.com/X11Libre/go-x11proto/demo/tetris64/sidplayer"
 	"github.com/X11Libre/go-x11proto/proto"
 	"github.com/X11Libre/go-x11proto/proto/base"
 	proto_core "github.com/X11Libre/go-x11proto/proto/core"
@@ -113,8 +109,6 @@ type TetrisWin struct {
 	frameH     int
 	fbW        int // framebuffer (8:5 background) width; border = (frameW-fbW)/2
 }
-
-var sidProc *os.Process
 
 func errPanic(e error, s string) {
 	if e != nil {
@@ -839,38 +833,8 @@ func (w *TetrisWin) toggleTheme() {
 	w.recreateWindows()
 }
 
-// ---- SID music ----
-
-func startMusic() {
-	sidPath, err := exec.LookPath("sidplayfp")
-	if err != nil {
-		return
-	}
-	tmpFile := filepath.Join(os.TempDir(), "go-x11proto-tetris.sid")
-	if err := os.WriteFile(tmpFile, sidData, 0644); err != nil {
-		return
-	}
-	cmd := exec.Command(sidPath, "-t0", tmpFile)
-	cmd.Stdin, _ = os.Open(os.DevNull)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return
-	}
-	sidProc = cmd.Process
-}
-
-func stopMusic() {
-	if sidProc != nil {
-		sidProc.Signal(os.Kill)
-		sidProc.Wait()
-		sidProc = nil
-	}
-}
-
 func cleanup() {
-	stopMusic()
+	sidplayer.Stop()
 }
 
 // ---- game loop ----
@@ -939,7 +903,7 @@ func main() {
 	}
 
 	gs = game.New()
-	startMusic()
+	sidplayer.Start(sidData)
 
 	curState = stateIntro
 	gameLoop(conn, win)
