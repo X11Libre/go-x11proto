@@ -9,3 +9,5 @@
 [x] add a help page - both within loader as well as game - should pause the game - use a border like the game area's border   -- F1 toggles in loader+game, pauses (gravity halts), hides board so it's not occluded, well-style thick border, updated keys
 [x] upload assets as server-side images and use those, if not already done yet   -- already done: frame/loader/glyphs uploaded as pixmaps (Image.Upload), reused via SetWindowBackgroundPixmap + CopyArea (no per-frame pixel uploads)
 [x] add little readme with help   -- demo/tetris64/README.md (run + controls + assets)
+[x] crop the VIC black border out of the bg images; let the bg window's black background generate it; pixmaps keep the original C64 8:5 aspect (zoomed)   -- cropped all frame/loader PNGs (color+mono, FHD/WQHD/UHD4K) to the 8:5 framebuffer (FHD 1728x1080, WQHD 2304x1440, 4K 3456x2160); bgWin is now framebuffer-sized & centered in the black frame window; layout X coords shifted by -border (96/128/192). verified FHD+WQHD
+[ ] add current resolution / theme to main/frame window title

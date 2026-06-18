@@ -77,12 +77,13 @@ type resLayout struct {
 	gameOverX, gameOverY int
 }
 
-// Score/lines/next positions measured from the original FHD screenshots
-// (assets/screenshots) and expressed per resolution (≈ C64-space coord * scale).
+// Positions are relative to the framebuffer (bgWin) origin, i.e. the cropped
+// background without the black side-border. X coords = original full-frame X
+// minus the per-resolution border (FHD 96, WQHD 128, UHD4K 192).
 var layouts = []resLayout{
-	{cell: 42, bx: 755, by: 99, nx: 1398, ny: 174, scoreX: 1475, scoreY: 70, linesX: 1545, linesY: 119, numRight: 1739, adv: 48, gameOverX: 720, gameOverY: 475},
-	{cell: 55, bx: 1010, by: 143, nx: 1864, ny: 232, scoreX: 2023, scoreY: 94, linesX: 2080, linesY: 159, numRight: 2375, adv: 64, gameOverX: 960, gameOverY: 633},
-	{cell: 83, bx: 1513, by: 212, nx: 2796, ny: 348, scoreX: 3034, scoreY: 141, linesX: 3125, linesY: 238, numRight: 3562, adv: 96, gameOverX: 1440, gameOverY: 950},
+	{cell: 42, bx: 659, by: 99, nx: 1302, ny: 174, scoreX: 1379, scoreY: 70, linesX: 1449, linesY: 119, numRight: 1643, adv: 48, gameOverX: 624, gameOverY: 475},
+	{cell: 55, bx: 882, by: 143, nx: 1736, ny: 232, scoreX: 1895, scoreY: 94, linesX: 1952, linesY: 159, numRight: 2247, adv: 64, gameOverX: 832, gameOverY: 633},
+	{cell: 83, bx: 1321, by: 212, nx: 2604, ny: 348, scoreX: 2842, scoreY: 141, linesX: 2933, linesY: 238, numRight: 3370, adv: 96, gameOverX: 1248, gameOverY: 950},
 }
 
 type TetrisWin struct {
@@ -113,6 +114,7 @@ type TetrisWin struct {
 	showGhost  bool
 	frameW     int
 	frameH     int
+	fbW        int // framebuffer (8:5 background) width; border = (frameW-fbW)/2
 }
 
 var sidProc *os.Process
@@ -211,6 +213,12 @@ func (w *TetrisWin) createWin(screenW, screenH int) {
 	w.showGhost = true
 	l := w.layout
 
+	// The framebuffer keeps the original C64 8:5 aspect (320x200, zoomed). The
+	// background art is cropped to it; the black left/right border is generated
+	// by the frame window's black background, not baked into the pixmap.
+	w.fbW = res.h * 8 / 5
+	border := (res.w - w.fbW) / 2
+
 	// digit colour matches the background's score text (sampled from the FHD art)
 	w.glyphTint = glyphTintColor()
 	w.bg = w.uploadBg(loadFrame(res.name))
@@ -238,15 +246,16 @@ func (w *TetrisWin) createWin(screenW, screenH int) {
 		BackPixel: 0,
 	})
 
-	// bg window: child of frame, exactly image size, centered
+	// bg window: child of frame, framebuffer-sized (8:5), centered so the
+	// frame's black background shows through as the left/right border.
 	bgXID := base.WINDOW(w.conn.NextResourceID())
 	_, err := w.conn.Send(&request.CreateWindowRequest{
 		Depth:     0,
 		Wid:       bgXID,
 		Parent:    w.frameWin.XID,
-		X:         0,
+		X:         base.INT16(border),
 		Y:         0,
-		Width:     base.CARD16(res.w),
+		Width:     base.CARD16(w.fbW),
 		Height:    base.CARD16(res.h),
 		Border:    0,
 		Class:     request.WindowClass_InputOutput,
@@ -625,9 +634,9 @@ func (w *TetrisWin) drawHelp() {
 	res := resolutions[w.resIdx]
 	fs := w.scale
 	bgDraw := tk_core.Drawable{Conn: w.tkConn, XID: w.bgWin}
-	hx := 40 * res.w / 320
+	hx := 40 * w.fbW / 320
 	hy := 24 * res.h / 200
-	hbw := res.w - 2*hx
+	hbw := w.fbW - 2*hx
 	hbh := res.h - 2*hy
 	bt := fs // border thickness (like the well border)
 	if bt < 2 {
@@ -645,12 +654,12 @@ func (w *TetrisWin) drawHelp() {
 		{X: base.INT16(hx + hbw - bt), Y: base.INT16(hy), Width: base.CARD16(bt), Height: base.CARD16(hbh)},
 	})
 
-	titleX := (res.w - 4*8*fs) / 2
+	titleX := (w.fbW - 4*8*fs) / 2
 	tetris_font.DrawString(bgDraw, w.gcText,
 		base.INT16(titleX), base.INT16(hy+12*res.h/200), fs, "HELP")
 	sepY := hy + 20*res.h/200
 	w.fillRects(w.bgWin, w.gcText, []base.Rectangle{
-		{X: base.INT16(hx + 16*res.w/320), Y: base.INT16(sepY), Width: base.CARD16(hbw - 32*res.w/320), Height: base.CARD16(bt)},
+		{X: base.INT16(hx + 16*w.fbW/320), Y: base.INT16(sepY), Width: base.CARD16(hbw - 32*w.fbW/320), Height: base.CARD16(bt)},
 	})
 
 	helpLines := []string{
@@ -668,10 +677,10 @@ func (w *TetrisWin) drawHelp() {
 	for i, line := range helpLines {
 		yy := hy + (30+i*10)*res.h/200
 		tetris_font.DrawString(bgDraw, w.gcText,
-			base.INT16(hx+16*res.w/320), base.INT16(yy), fs, line)
+			base.INT16(hx+16*w.fbW/320), base.INT16(yy), fs, line)
 	}
 
-	closeX := (res.w - 17*8*fs) / 2
+	closeX := (w.fbW - 17*8*fs) / 2
 	tetris_font.DrawString(bgDraw, w.gcText,
 		base.INT16(closeX), base.INT16(hy+138*res.h/200), fs, "PRESS F1 TO CLOSE")
 }
@@ -713,9 +722,9 @@ func (w *TetrisWin) HandleWindowEvent(ev events.Event) bool {
 				return true
 			}
 
-			// re-center bgWin
+			// re-center bgWin (framebuffer-sized; black frame is the border)
 			res := resolutions[w.resIdx]
-			bgX := (nw - res.w) / 2
+			bgX := (nw - w.fbW) / 2
 			bgY := (nh - res.h) / 2
 			if bgX < 0 {
 				bgX = 0
