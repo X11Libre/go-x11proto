@@ -28,8 +28,9 @@ type Window struct {
 	EventMask base.CARD32
 
 	// Optional initial attributes. When the Set* flag is false the default is
-	// used (white background, server-default border), so callers no longer need
-	// a follow-up ChangeWindowAttributes just to set these.
+	// used (white background), so callers no longer need a follow-up
+	// ChangeWindowAttributes just to set these. BorderWidth defaults to 0.
+	BorderWidth    base.CARD16
 	BackPixel      base.CARD32
 	SetBackPixel   bool
 	BorderPixel    base.CARD32
@@ -59,7 +60,7 @@ func (w *Window) Create() error {
 		Y:              int16(w.Y),
 		Width:          uint16(w.W),
 		Height:         uint16(w.H),
-		BorderWidth:    1, // preserve the previous default
+		BorderWidth:    uint16(w.BorderWidth),
 		EventMask:      w.EventMask,
 		SetBackPixel:   true,
 		BackPixel:      w.Conn.X11Conn.DefaultWhitePixel(),
