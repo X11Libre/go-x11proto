@@ -230,7 +230,7 @@ func (w *TetrisWin) createWin(screenW, screenH int) {
 			Conn: w.tkConn,
 		},
 		Parent:    w.tkConn.GetRoot(),
-		Name:      "C64 TETRIS",
+		Name:      fmt.Sprintf("C64 TETRIS - %s / %s", res.name, theme),
 		X:         base.INT16((screenW - res.w) / 2),
 		Y:         base.INT16((screenH - res.h) / 2),
 		W:         base.CARD16(res.w),
