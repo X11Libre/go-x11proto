@@ -11,7 +11,7 @@ import (
 	"log"
 )
 
-//go:embed demo/simple/xlogo.xpm
+//go:embed xlogo.xpm
 var xlogoXPM []byte
 
 type MyWindow struct {

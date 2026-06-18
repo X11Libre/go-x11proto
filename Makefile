@@ -16,4 +16,11 @@ fmt:
 
 clean:
 	for d in $(SUBDIRS) ; do $(MAKE) -C $$d clean ; done
-	rm -Rf $(EXECUTABLE) $(TEMPFILES)
+	rm -Rf $(EXECUTABLE) $(TEMPFILES) simple
+
+simple:
+	$(GO) build -o simple ./demo/simple
+
+test-simple: simple
+	./simple
+
