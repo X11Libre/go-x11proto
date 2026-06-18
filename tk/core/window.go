@@ -27,6 +27,14 @@ type Window struct {
 	W         base.CARD16
 	EventMask base.CARD32
 
+	// Optional initial attributes. When the Set* flag is false the default is
+	// used (white background, server-default border), so callers no longer need
+	// a follow-up ChangeWindowAttributes just to set these.
+	BackPixel      base.CARD32
+	SetBackPixel   bool
+	BorderPixel    base.CARD32
+	SetBorderPixel bool
+
 	// derived classes need to link themselves in here
 	WinHandler WindowHandler
 }
@@ -45,7 +53,23 @@ func (w *Window) Create() error {
 		w.ParentXID = w.Conn.X11Conn.DefaultRoot()
 	}
 
-	xid, err := rpc.CreateWindow1(w.Conn.X11Conn, w.ParentXID, int16(w.X), int16(w.Y), uint16(w.W), uint16(w.H), w.EventMask)
+	spec := rpc.WindowSpec{
+		Parent:         w.ParentXID,
+		X:              int16(w.X),
+		Y:              int16(w.Y),
+		Width:          uint16(w.W),
+		Height:         uint16(w.H),
+		BorderWidth:    1, // preserve the previous default
+		EventMask:      w.EventMask,
+		SetBackPixel:   true,
+		BackPixel:      w.Conn.X11Conn.DefaultWhitePixel(),
+		SetBorderPixel: w.SetBorderPixel,
+		BorderPixel:    w.BorderPixel,
+	}
+	if w.SetBackPixel {
+		spec.BackPixel = w.BackPixel
+	}
+	xid, err := rpc.CreateWindow(w.Conn.X11Conn, spec)
 	w.XID = xid
 
 	if err != nil {
