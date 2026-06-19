@@ -24,6 +24,7 @@ type COLORMAP = XID
 type VISUAL = XID
 type FONT = XID
 type GC = XID
+type CURSOR = XID
 
 func bool2BOOL(b bool) BOOL {
 	if b {
