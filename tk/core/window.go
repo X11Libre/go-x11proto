@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
+	"github.com/X11Libre/go-x11proto/proto/core/request"
 	"github.com/X11Libre/go-x11proto/proto/rpc"
 )
 
@@ -111,4 +112,84 @@ func (w Window) Unmap() error {
 func (w Window) SetName(n string) error {
 	w.Name = n
 	return rpc.SetWindowName(w.Conn.X11Conn, w.XID, n)
+}
+
+func (w Window) Destroy() error {
+	return rpc.DestroyWindow(w.Conn.X11Conn, w.XID)
+}
+
+func (w Window) ClearArea(x, y base.INT16, width, height base.CARD16, exposures bool) error {
+	return rpc.ClearArea(w.Conn.X11Conn, w.XID, x, y, width, height, exposures)
+}
+
+func (w Window) MapSubwindows() error {
+	return rpc.MapSubwindows(w.Conn.X11Conn, w.XID)
+}
+
+func (w Window) UnmapSubwindows() error {
+	return rpc.UnmapSubwindows(w.Conn.X11Conn, w.XID)
+}
+
+func (w Window) Reparent(parent base.WINDOW, x, y base.INT16) error {
+	return rpc.ReparentWindow(w.Conn.X11Conn, w.XID, parent, x, y)
+}
+
+func (w Window) CirculateUp() error {
+	return rpc.CirculateWindow(w.Conn.X11Conn, request.CirculateRaiseLowest, w.XID)
+}
+
+func (w Window) CirculateDown() error {
+	return rpc.CirculateWindow(w.Conn.X11Conn, request.CirculateLowerHighest, w.XID)
+}
+
+func (w Window) GetAttributes() (*request.GetWindowAttributesReply, error) {
+	return rpc.GetWindowAttributes(w.Conn.X11Conn, w.XID)
+}
+
+func (w Window) QueryTree() (*request.QueryTreeReply, error) {
+	return rpc.QueryTree(w.Conn.X11Conn, w.XID)
+}
+
+// ChangeAttributes applies the given attribute changes; Window is filled in.
+func (w Window) ChangeAttributes(req *request.ChangeWindowAttributesRequest) error {
+	req.Window = w.XID
+	return rpc.ChangeWindowAttributes(w.Conn.X11Conn, req)
+}
+
+// Configure applies the given geometry/stacking changes; Window is filled in.
+func (w Window) Configure(req *request.ConfigureWindowRequest) error {
+	req.Window = w.XID
+	return rpc.ConfigureWindow(w.Conn.X11Conn, req)
+}
+
+func (w Window) Move(x, y base.INT16) error {
+	return w.Configure(&request.ConfigureWindowRequest{
+		ValueMask: request.CONFIG_WINDOW_X | request.CONFIG_WINDOW_Y, X: x, Y: y,
+	})
+}
+
+func (w Window) Resize(width, height base.CARD16) error {
+	return w.Configure(&request.ConfigureWindowRequest{
+		ValueMask: request.CONFIG_WINDOW_WIDTH | request.CONFIG_WINDOW_HEIGHT, Width: width, Height: height,
+	})
+}
+
+func (w Window) MoveResize(x, y base.INT16, width, height base.CARD16) error {
+	return w.Configure(&request.ConfigureWindowRequest{
+		ValueMask: request.CONFIG_WINDOW_X | request.CONFIG_WINDOW_Y |
+			request.CONFIG_WINDOW_WIDTH | request.CONFIG_WINDOW_HEIGHT,
+		X: x, Y: y, Width: width, Height: height,
+	})
+}
+
+func (w Window) Raise() error {
+	return w.Configure(&request.ConfigureWindowRequest{
+		ValueMask: request.CONFIG_WINDOW_STACK_MODE, StackMode: request.StackModeAbove,
+	})
+}
+
+func (w Window) Lower() error {
+	return w.Configure(&request.ConfigureWindowRequest{
+		ValueMask: request.CONFIG_WINDOW_STACK_MODE, StackMode: request.StackModeBelow,
+	})
 }
