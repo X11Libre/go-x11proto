@@ -34,12 +34,12 @@ func TestQueryFontReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkReply(t, got, &QueryFontReply{
-		MinBounds: base.CharInfo{1, 2, 3, 4, 5, 6}, MaxBounds: base.CharInfo{7, 8, 9, 10, 11, 12},
+		MinBounds: base.CharInfo{LeftSideBearing: 1, RightSideBearing: 2, CharacterWidth: 3, Ascent: 4, Descent: 5, Attributes: 6}, MaxBounds: base.CharInfo{LeftSideBearing: 7, RightSideBearing: 8, CharacterWidth: 9, Ascent: 10, Descent: 11, Attributes: 12},
 		MinCharOrByte2: 32, MaxCharOrByte2: 126, DefaultChar: 65,
 		DrawDirection: 0, MinByte1: 0, MaxByte1: 0, AllCharsExist: true,
 		FontAscent: 10, FontDescent: 12,
 		Properties: []base.FontProp{{Name: 0xAA, Value: 0xBB}},
-		CharInfos:  []base.CharInfo{{13, 14, 15, 16, 17, 18}},
+		CharInfos:  []base.CharInfo{{LeftSideBearing: 13, RightSideBearing: 14, CharacterWidth: 15, Ascent: 16, Descent: 17, Attributes: 18}},
 	})
 }
 
@@ -112,7 +112,7 @@ func TestListFontsWithInfoReply(t *testing.T) {
 	}
 	checkReply(t, got, &ListFontsWithInfoReply{
 		LastReply: false,
-		MinBounds: base.CharInfo{1, 2, 3, 4, 5, 6}, MaxBounds: base.CharInfo{7, 8, 9, 10, 11, 12},
+		MinBounds: base.CharInfo{LeftSideBearing: 1, RightSideBearing: 2, CharacterWidth: 3, Ascent: 4, Descent: 5, Attributes: 6}, MaxBounds: base.CharInfo{LeftSideBearing: 7, RightSideBearing: 8, CharacterWidth: 9, Ascent: 10, Descent: 11, Attributes: 12},
 		MinCharOrByte2: 32, MaxCharOrByte2: 126, DefaultChar: 65,
 		DrawDirection: 0, MinByte1: 0, MaxByte1: 0, AllCharsExist: true,
 		FontAscent: 10, FontDescent: 12, RepliesHint: 99,
