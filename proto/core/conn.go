@@ -47,6 +47,7 @@ type pendingRequest struct {
 	replyCh chan base.ReplyReader
 	errCh   chan error
 	done    chan struct{}
+	multi   bool // request produces a series of replies (e.g. ListFontsWithInfo)
 }
 
 func NewConn(display_name string, be bool) (*X11Conn, error) {
@@ -294,6 +295,76 @@ func (c *X11Conn) SendAndWait(req base.Request) (*base.ReplyReader, error) {
 	}
 }
 
+// ReplyIterator delivers the successive replies of a multi-reply request (the
+// only core example is ListFontsWithInfo). Call Next repeatedly until the
+// terminating reply, then Close; the connection cannot know where the series
+// ends, so the caller is responsible for closing it.
+type ReplyIterator struct {
+	c      *X11Conn
+	seq    base.CARD16
+	pr     *pendingRequest
+	closed bool
+}
+
+// SendAndIterate sends a request that produces a series of replies and returns
+// an iterator over them. The caller must Close the iterator when done.
+func (c *X11Conn) SendAndIterate(req base.Request) (*ReplyIterator, error) {
+	c.writeMu.Lock()
+
+	// first sequence number is 1
+	if c.nextSeq == 0 {
+		c.nextSeq++
+	}
+	seq := c.nextSeq
+	c.nextSeq++
+
+	pr := &pendingRequest{
+		replyCh: make(chan base.ReplyReader, 8),
+		errCh:   make(chan error, 1),
+		done:    make(chan struct{}),
+		multi:   true,
+	}
+
+	c.pendingMu.Lock()
+	c.pending[seq] = pr
+	c.pendingMu.Unlock()
+
+	if c.DebugRequests {
+		log.Printf("=> [seq %d] %T %+v (multi)", seq, req, req)
+	}
+
+	if err := c.writeRequest(req, seq); err != nil {
+		c.removePending(seq)
+		c.writeMu.Unlock()
+		return nil, c.errorF("SendAndIterate(): %w", err)
+	}
+	c.writeMu.Unlock()
+
+	return &ReplyIterator{c: c, seq: seq, pr: pr}, nil
+}
+
+// Next blocks for the next reply in the series (or an error / timeout).
+func (it *ReplyIterator) Next() (*base.ReplyReader, error) {
+	select {
+	case reply := <-it.pr.replyCh:
+		return &reply, nil
+	case err := <-it.pr.errCh:
+		return nil, err
+	case <-time.After(30 * time.Second):
+		return nil, it.c.errorF("ReplyIterator.Next(): timeout")
+	}
+}
+
+// Close unregisters the request, releasing the reader loop. Safe to call more
+// than once.
+func (it *ReplyIterator) Close() {
+	if it.closed {
+		return
+	}
+	it.closed = true
+	it.c.removePending(it.seq)
+}
+
 func (c *X11Conn) handleReply(header []byte) error {
 	rb := base.MakeReadBuffer(header, c.BE)
 
@@ -320,13 +391,26 @@ func (c *X11Conn) handleReply(header []byte) error {
 
 	c.pendingMu.Lock()
 	pr, ok := c.pending[reply.Sequence]
+	if ok && !pr.multi {
+		// one-shot request: consume the pending entry now
+		delete(c.pending, reply.Sequence)
+	}
+	c.pendingMu.Unlock()
+
 	if !ok {
 		log.Printf(" --> no pending request for sequence %d\n", reply.Sequence)
-		c.pendingMu.Unlock()
 		return nil
 	}
-	delete(c.pending, reply.Sequence)
-	c.pendingMu.Unlock()
+
+	if pr.multi {
+		// multi-reply request: deliver every reply with backpressure until the
+		// iterator is closed (which closes done and releases this send).
+		select {
+		case pr.replyCh <- reply:
+		case <-pr.done:
+		}
+		return nil
+	}
 
 	select {
 	case pr.replyCh <- reply:
