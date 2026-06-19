@@ -60,21 +60,21 @@ func TestGetWindowAttributesEncode(t *testing.T) {
 
 func TestGetWindowAttributesReply(t *testing.T) {
 	tail := cat(
-		u32(0x20),  // visual
-		u16(1),     // class
-		u8(1),      // bit-gravity
-		u8(1),      // win-gravity
-		u32(0xFF),  // backing-planes
-		u32(0xAA),  // backing-pixel
-		u8(1),      // save-under
-		u8(1),      // map-is-installed
-		u8(2),      // map-state
-		u8(0),      // override-redirect
-		u32(0x44),  // colormap
-		u32(0xFFFF),// all-event-masks
-		u32(0x8000),// your-event-mask
-		u16(0x10),  // do-not-propagate
-		u16(0),     // unused
+		u32(0x20),   // visual
+		u16(1),      // class
+		u8(1),       // bit-gravity
+		u8(1),       // win-gravity
+		u32(0xFF),   // backing-planes
+		u32(0xAA),   // backing-pixel
+		u8(1),       // save-under
+		u8(1),       // map-is-installed
+		u8(2),       // map-state
+		u8(0),       // override-redirect
+		u32(0x44),   // colormap
+		u32(0xFFFF), // all-event-masks
+		u32(0x8000), // your-event-mask
+		u16(0x10),   // do-not-propagate
+		u16(0),      // unused
 	)
 	r := makeReply(1, 3, tail)
 	got := &GetWindowAttributesReply{}
