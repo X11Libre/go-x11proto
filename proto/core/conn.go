@@ -41,6 +41,13 @@ type X11Conn struct {
 	Setup          setup.XSetupOK
 	AtomCache      map[string]base.ATOM
 	windowHandlers map[base.WINDOW]X11WindowEventHandler
+
+	// extension registry: cached QueryExtension results and the registered
+	// event/error code ranges (see extension.go).
+	extMu      sync.Mutex
+	extensions map[string]*Extension
+	extEvents  []extEventRange
+	extErrors  []extErrorRange
 }
 
 type pendingRequest struct {
@@ -70,6 +77,7 @@ func NewConn(display_name string, be bool) (*X11Conn, error) {
 		eventCh:        make(chan events.Event, 256),
 		errorCh:        make(chan error, 16),
 		windowHandlers: make(map[base.WINDOW]X11WindowEventHandler),
+		extensions:     make(map[string]*Extension),
 		AtomCache: map[string]base.ATOM{
 			"STRING":  atoms.STRING,
 			"WM_NAME": atoms.WM_NAME,
@@ -190,8 +198,12 @@ func (c *X11Conn) handleError(header []byte) {
 	minorOpcode := c.convBE16(header[8:10])
 	majorOpcode := header[10]
 
+	name := errorcode.Name(code)
+	if ext := c.extErrorName(base.CARD8(code)); ext != "" {
+		name = ext + " extension error"
+	}
 	log.Printf("X11 Error: %s (code=%d), seq=%d, opcode=%d.%d, id=%d\n",
-		errorcode.Name(code), code, seq, majorOpcode, minorOpcode, badID)
+		name, code, seq, majorOpcode, minorOpcode, badID)
 
 	err := c.errorF("x11 error code %d", code)
 
@@ -421,7 +433,17 @@ func (c *X11Conn) handleReply(header []byte) error {
 }
 
 func (c *X11Conn) handleEvent(header []byte) {
-	ev, err := events.ParseEvent(header, c.BE)
+	// route to a registered extension event parser if the code is in range,
+	// otherwise fall back to the core event parser
+	var (
+		ev  events.Event
+		err error
+	)
+	if parser := c.extEventParser(base.CARD8(header[0] & 0x7f)); parser != nil {
+		ev, err = parser(header, c.BE)
+	} else {
+		ev, err = events.ParseEvent(header, c.BE)
+	}
 	if err != nil {
 		return
 	}
