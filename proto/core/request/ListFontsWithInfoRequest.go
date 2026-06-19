@@ -19,9 +19,9 @@ func (r *ListFontsWithInfoRequest) WriteInto(writer *base.RequestWriter) error {
 	return nil
 }
 
-// ListFontsWithInfoReply is one reply in the series. The server sends one per
-// matching font followed by a terminating reply with LastReply set. Parsing the
-// full series needs multi-reply support in the connection layer (see the RPC).
+// ListFontsWithInfoReply is one reply in the series: one per matching font,
+// followed by a terminating reply with LastReply set. The rpc.ListFontsWithInfo
+// helper iterates the whole series via core.SendAndIterate.
 type ListFontsWithInfoReply struct {
 	LastReply      bool
 	MinBounds      base.CharInfo
