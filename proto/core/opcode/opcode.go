@@ -120,4 +120,5 @@ const (
 	GetPointerMapping     = 117
 	SetModifierMapping    = 118
 	GetModifierMapping    = 119
+	NoOperation           = 127
 )
