@@ -15,6 +15,15 @@ const (
 	CONFIG_WINDOW_STACK_MODE   = 0x0040
 )
 
+// Stack mode (the value for CONFIG_WINDOW_STACK_MODE).
+const (
+	StackModeAbove    = 0
+	StackModeBelow    = 1
+	StackModeTopIf    = 2
+	StackModeBottomIf = 3
+	StackModeOpposite = 4
+)
+
 type ConfigureWindowRequest struct {
 	Window      base.WINDOW
 	ValueMask   base.CARD16
