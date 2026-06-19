@@ -31,6 +31,20 @@ func (rw *RequestWriter) SetParam0bool(b bool) {
 	}
 }
 
+// SetMinorOpcode sets the data byte (param0), which for extension requests is
+// the minor opcode. Alias of SetParam0 that documents extension intent.
+func (rw *RequestWriter) SetMinorOpcode(minor CARD8) {
+	rw.param0 = minor
+}
+
+// SetExtOpcode sets the major opcode (the extension's assigned request opcode,
+// from QueryExtension) and the minor opcode (the data byte) of an extension
+// request in one call.
+func (rw *RequestWriter) SetExtOpcode(major, minor CARD8) {
+	rw.opcode = major
+	rw.param0 = minor
+}
+
 func (rw RequestWriter) ToBytes() []byte {
 	rounded := RoundFullUnits(uint(rw.Payload.Len()))
 	missing := rounded - uint(rw.Payload.Len())
