@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
-	"github.com/X11Libre/go-x11proto/proto/rpc"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	tk_widget "github.com/X11Libre/go-x11proto/tk/widget"
 	"github.com/X11Libre/go-x11proto/tk/xpm"
@@ -16,7 +15,7 @@ var xlogoXPM []byte
 
 type MyWindow struct {
 	tk_core.Window
-	Gc_black base.GC
+	Gc_black *tk_core.GC
 	font     base.FONT
 	bgPixmap base.PIXMAP
 	Win2     ChildWindow
@@ -31,7 +30,7 @@ func (w *MyWindow) Init() {
 	conn := w.Window.Conn.X11Conn
 	if img, err := xpm.DecodeBytes(xlogoXPM); err == nil {
 		if pixmap, err := img.Upload(conn, conn.DefaultRoot()); err == nil {
-			rpc.SetWindowBackgroundPixmap(conn, w.Window.XID, pixmap)
+			w.Window.SetBackgroundPixmap(pixmap)
 			w.bgPixmap = pixmap
 		}
 	}
@@ -82,9 +81,8 @@ func (w *MyWindow) HandleWindowEvent(ev events.Event) bool {
 		w.font = fontid
 	}
 
-	if w.Gc_black.Invalid() {
-		gcid, err := rpc.CreateGC1(
-			w.Window.Conn.X11Conn,
+	if w.Gc_black == nil {
+		gcid, err := w.Window.Conn.CreateGC1(
 			w.Window.Conn.X11Conn.DefaultBlackPixel(),
 			w.Window.Conn.X11Conn.DefaultWhitePixel(),
 			w.font,
@@ -96,14 +94,14 @@ func (w *MyWindow) HandleWindowEvent(ev events.Event) bool {
 	switch ev.(type) {
 	case *events.ExposeEvent:
 		w.FillRects(
-			w.Gc_black,
+			w.Gc_black.XID,
 			[]base.Rectangle{
 				{X: 5, Y: 60, Width: 50, Height: 50},
 				{X: 60, Y: 60, Width: 50, Height: 50},
 			},
 		)
 		w.PutText8(
-			w.Gc_black,
+			w.Gc_black.XID,
 			30,
 			30,
 			"hello foo bar",

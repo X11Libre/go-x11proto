@@ -3,13 +3,12 @@ package main
 import (
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
-	"github.com/X11Libre/go-x11proto/proto/rpc"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 )
 
 type ChildWindow struct {
 	tk_core.Window
-	Gc_black base.GC
+	Gc_black *tk_core.GC
 	font     base.FONT
 }
 
@@ -26,9 +25,8 @@ func (w *ChildWindow) HandleWindowEvent(ev events.Event) bool {
 		w.font = fontid
 	}
 
-	if w.Gc_black.Invalid() {
-		gcid, err := rpc.CreateGC1(
-			w.Window.Conn.X11Conn,
+	if w.Gc_black == nil {
+		gcid, err := w.Window.Conn.CreateGC1(
 			w.Window.Conn.X11Conn.DefaultBlackPixel(),
 			w.Window.Conn.X11Conn.DefaultWhitePixel(),
 			w.font,
@@ -40,14 +38,14 @@ func (w *ChildWindow) HandleWindowEvent(ev events.Event) bool {
 	switch ev.(type) {
 	case *events.ExposeEvent:
 		w.FillRects(
-			w.Gc_black,
+			w.Gc_black.XID,
 			[]base.Rectangle{
 				{X: 5, Y: 60, Width: 50, Height: 50},
 				{X: 60, Y: 60, Width: 50, Height: 50},
 			},
 		)
 		w.PutText8(
-			w.Gc_black,
+			w.Gc_black.XID,
 			30,
 			30,
 			"child win",
