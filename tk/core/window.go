@@ -122,6 +122,12 @@ func (w Window) ClearArea(x, y base.INT16, width, height base.CARD16, exposures 
 	return rpc.ClearArea(w.Conn.X11Conn, w.XID, x, y, width, height, exposures)
 }
 
+// SetBackgroundPixmap sets the window's background to the given pixmap. The
+// change takes effect on the next repaint (e.g. after ClearArea).
+func (w Window) SetBackgroundPixmap(pm base.PIXMAP) error {
+	return rpc.SetWindowBackgroundPixmap(w.Conn.X11Conn, w.XID, pm)
+}
+
 func (w Window) MapSubwindows() error {
 	return rpc.MapSubwindows(w.Conn.X11Conn, w.XID)
 }

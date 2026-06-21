@@ -55,6 +55,19 @@ Legend:
 | `MoveResize` | ConfigureWindow | OK | `TestTkWindowOps` |
 | `Raise` | ConfigureWindow (stack=Above) | OK | `TestTkWindowOps` |
 | `Lower` | ConfigureWindow (stack=Below) | OK | `TestTkWindowOps` |
+| `SetBackgroundPixmap` | ChangeWindowAttributes (background-pixmap) | OK | `TestTkSetBackgroundPixmap` |
+
+## Connection / resource helpers
+
+| Method | Wraps | Status | Test |
+|--------|-------|--------|------|
+| `TkConn.InternAtom` | InternAtom (cached) | RT | `TestTkInternAtom` (resolves + caches, verified via GetAtomName) |
+| `TkConn.CreateGC1` | CreateGC | OK | `TestTkGC` |
+| `GC.SetForeground` / `SetBackground` / `Change` | ChangeGC | OK | `TestTkGC` |
+| `GC.Free` | FreeGC | OK | `TestTkGC` |
+| `TkConn.CreatePixmap` | CreatePixmap | OK | `TestTkPixmap` / `TestTkGC` |
+| `Pixmap.Free` | FreePixmap | OK | `TestTkPixmap` |
+| `Pixmap` (drawing / copy / query) | *embeds Drawable* | RT | `TestTkPixmap` (GetGeometry verified) |
 
 ## Notes
 

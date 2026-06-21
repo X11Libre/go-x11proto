@@ -96,3 +96,102 @@ func TestTkDrawableOps(t *testing.T) {
 	must(t, rpc.FreePixmap(c, dst), "FreePixmap dst")
 	must(t, rpc.FreePixmap(c, pm), "FreePixmap")
 }
+
+// TestTkGC exercises the tk GC resource wrapper.
+func TestTkGC(t *testing.T) {
+	c := connectLE(t)
+	defer c.Close()
+	tk := tk_core.MakeTkConn(c)
+
+	gc, err := tk.CreateGC1(c.DefaultWhitePixel(), c.DefaultBlackPixel(), 0)
+	must(t, err, "TkConn.CreateGC1")
+	must(t, gc.SetForeground(c.DefaultBlackPixel()), "GC.SetForeground")
+	must(t, gc.SetBackground(c.DefaultWhitePixel()), "GC.SetBackground")
+	must(t, gc.Change(&request.ChangeGCRequest{
+		ValueMask: request.GC_MASK_LINE_WIDTH, LineWidth: 2,
+	}), "GC.Change")
+
+	// usable for drawing
+	pm, err := tk.CreatePixmap(screen(c).RootDepth, c.DefaultRoot(), 32, 32)
+	must(t, err, "TkConn.CreatePixmap")
+	must(t, pm.FillRect(gc.XID, 0, 0, 16, 16), "Pixmap.FillRect")
+
+	must(t, pm.Free(), "Pixmap.Free")
+	must(t, gc.Free(), "GC.Free")
+}
+
+// TestTkPixmap exercises the tk Pixmap wrapper and its embedded Drawable methods.
+func TestTkPixmap(t *testing.T) {
+	c := connectLE(t)
+	defer c.Close()
+	tk := tk_core.MakeTkConn(c)
+	depth := screen(c).RootDepth
+
+	src, err := tk.CreatePixmap(depth, c.DefaultRoot(), 40, 40)
+	must(t, err, "CreatePixmap src")
+	dst, err := tk.CreatePixmap(depth, c.DefaultRoot(), 40, 40)
+	must(t, err, "CreatePixmap dst")
+	gc := newGC(t, c)
+
+	// drawing + copy via the embedded Drawable
+	must(t, src.FillRect(gc, 0, 0, 40, 40), "Pixmap.FillRect")
+	must(t, src.CopyArea(dst.XID, gc, 0, 0, 0, 0, 40, 40), "Pixmap.CopyArea")
+
+	g, err := src.GetGeometry()
+	must(t, err, "Pixmap.GetGeometry")
+	if g.Width != 40 || g.Height != 40 {
+		t.Errorf("pixmap geometry = %dx%d, want 40x40", g.Width, g.Height)
+	}
+
+	must(t, rpc.FreeGC(c, gc), "FreeGC")
+	must(t, src.Free(), "src.Free")
+	must(t, dst.Free(), "dst.Free")
+}
+
+// TestTkInternAtom verifies TkConn.InternAtom resolves and caches atoms.
+func TestTkInternAtom(t *testing.T) {
+	c := connectLE(t)
+	defer c.Close()
+	tk := tk_core.MakeTkConn(c)
+
+	a1, err := tk.InternAtom("WM_NAME")
+	must(t, err, "InternAtom WM_NAME")
+	if a1 == 0 {
+		t.Fatal("WM_NAME interned to 0")
+	}
+	a2, err := tk.InternAtom("WM_NAME") // cached
+	must(t, err, "InternAtom WM_NAME (cached)")
+	if a1 != a2 {
+		t.Errorf("cached atom = %d, want %d", a2, a1)
+	}
+	name, err := rpc.GetAtomName(c, a1)
+	must(t, err, "GetAtomName")
+	if name != "WM_NAME" {
+		t.Errorf("GetAtomName = %q, want WM_NAME", name)
+	}
+}
+
+// TestTkSetBackgroundPixmap exercises Window.SetBackgroundPixmap.
+func TestTkSetBackgroundPixmap(t *testing.T) {
+	c := connectLE(t)
+	defer c.Close()
+	tk := tk_core.MakeTkConn(c)
+
+	w := tk_core.Window{
+		Drawable: tk_core.Drawable{Conn: &tk}, ParentXID: c.DefaultRoot(),
+		W: 64, H: 64, SetBackPixel: true, BackPixel: c.DefaultBlackPixel(),
+	}
+	must(t, w.Create(), "Window.Create")
+	pm, err := tk.CreatePixmap(screen(c).RootDepth, c.DefaultRoot(), 64, 64)
+	must(t, err, "CreatePixmap")
+	gc := newGC(t, c)
+	must(t, pm.FillRect(gc, 0, 0, 64, 64), "Pixmap.FillRect")
+
+	must(t, w.SetBackgroundPixmap(pm.XID), "Window.SetBackgroundPixmap")
+	must(t, w.Map(), "Window.Map")
+	must(t, w.ClearArea(0, 0, 0, 0, false), "Window.ClearArea")
+
+	must(t, rpc.FreeGC(c, gc), "FreeGC")
+	must(t, pm.Free(), "Pixmap.Free")
+	must(t, w.Destroy(), "Window.Destroy")
+}

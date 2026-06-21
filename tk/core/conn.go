@@ -11,6 +11,7 @@ type TkConn struct {
 	X11Conn    *proto_core.X11Conn
 	RootWindow Window
 	FontMap    map[string]proto_base.FONT
+	AtomMap    map[string]proto_base.ATOM
 }
 
 func (tkc *TkConn) GetRoot() *Window {
@@ -36,6 +37,26 @@ func (tkc *TkConn) GetFont(name string) (proto_base.FONT, error) {
 
 	tkc.FontMap[name] = fontId
 	return fontId, nil
+}
+
+// InternAtom returns the atom for the given name, caching the result so each
+// name is only interned once per connection.
+func (tkc *TkConn) InternAtom(name string) (proto_base.ATOM, error) {
+	if tkc.AtomMap == nil {
+		tkc.AtomMap = make(map[string]proto_base.ATOM)
+	}
+
+	if atom, ok := tkc.AtomMap[name]; ok {
+		return atom, nil
+	}
+
+	atom, err := proto_rpc.InternAtom(tkc.X11Conn, name)
+	if err != nil {
+		return 0, fmt.Errorf("TkConn::InternAtom(\"%s\"): %w", name, err)
+	}
+
+	tkc.AtomMap[name] = atom
+	return atom, nil
 }
 
 func MakeTkConn(conn *proto_core.X11Conn) TkConn {
