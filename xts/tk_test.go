@@ -74,6 +74,7 @@ func TestTkDrawableOps(t *testing.T) {
 	d := tk_core.Drawable{Conn: &tk, XID: pm}
 	gc := newGC(t, c)
 
+	must(t, d.FillRects(gc, nil), "Drawable.FillRects(empty)") // no-op, no round-trip
 	must(t, d.PolyPoint(gc, request.CoordModeOrigin, []base.Point{{X: 1, Y: 1}}), "Drawable.PolyPoint")
 	must(t, d.PolySegment(gc, []base.Segment{{X1: 0, Y1: 0, X2: 5, Y2: 5}}), "Drawable.PolySegment")
 	must(t, d.PolyRectangle(gc, []base.Rectangle{{X: 0, Y: 0, Width: 10, Height: 10}}), "Drawable.PolyRectangle")

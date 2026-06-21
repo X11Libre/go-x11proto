@@ -25,6 +25,9 @@ func (d Drawable) FillRect(gc base.GC, x base.INT16, y base.INT16, width base.CA
 }
 
 func (d Drawable) FillRects(gc base.GC, rects []base.Rectangle) error {
+	if len(rects) == 0 {
+		return nil // nothing to draw: skip the round-trip
+	}
 	return rpc.FillRects(d.Conn.X11Conn, d.XID, gc, rects)
 }
 
