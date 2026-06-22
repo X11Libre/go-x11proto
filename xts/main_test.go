@@ -18,14 +18,23 @@ import (
 // pointed at a freshly-built X server (e.g. in the xlibre/xserver CI pipeline):
 //
 //	XTS_XSERVER       server executable (default "Xvfb"); a name resolved via
-//	                  $PATH or an absolute/relative path
+//	                  $PATH or an absolute/relative path. The special value
+//	                  "none" skips spawning and runs against the existing
+//	                  $DISPLAY (NB: the live tests are destructive - don't point
+//	                  this at a session you care about).
 //	XTS_XSERVER_ARGS  arguments other than -displayfd, whitespace-separated
 //	                  (default "-screen 0 1280x1024x24")
 //
 // The harness always adds "-displayfd 1" itself and reads the assigned display
 // number from the server's stdout; that mechanism is implemented by every
-// server built from the xserver tree (Xvfb, Xephyr, Xorg, Xwayland).
+// server built from the xserver tree (Xvfb, Xephyr, Xnest, Xorg, Xwayland).
 func TestMain(m *testing.M) {
+	switch strings.ToLower(os.Getenv("XTS_XSERVER")) {
+	case "none", "off", "-":
+		fmt.Fprintf(os.Stderr, "xts: using existing DISPLAY=%q (no server spawned)\n", os.Getenv("DISPLAY"))
+		os.Exit(m.Run())
+	}
+
 	srv, restore, err := startXServer()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xts: X server unavailable (%v); using DISPLAY=%q\n", err, os.Getenv("DISPLAY"))

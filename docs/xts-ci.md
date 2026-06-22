@@ -38,6 +38,26 @@ contrib/xts/run-xts.sh
 `run-xts.sh` just sets `XTS_XSERVER`/`XTS_XSERVER_ARGS` and runs `go test ./xts/...`
 from the module root; `GOTESTFLAGS` overrides the `go test` flags.
 
+### Convenience wrappers
+
+For everyday local runs there are thin wrappers around `run-xts.sh` (all accept
+extra args to override the default screen, and pass `GOTESTFLAGS` through):
+
+| Script | Server | Isolation |
+|--------|--------|-----------|
+| `contrib/xts/run-xvfb.sh` | spawns Xvfb (headless) | full — touches no session |
+| `contrib/xts/run-xephyr.sh` | spawns Xephyr (nested window on `$DISPLAY`) | tests hit the nested server, not yours |
+| `contrib/xts/run-xnest.sh` | spawns Xnest (nested window on `$DISPLAY`) | tests hit the nested server, not yours |
+| `contrib/xts/run-local.sh` | the server already on `$DISPLAY` (no spawn) | **none — destructive** |
+
+`run-xvfb.sh` is the default choice. `run-xephyr.sh` / `run-xnest.sh` need a
+parent `$DISPLAY` to show their window but still isolate the tests in the nested
+server. `run-local.sh` runs the **destructive** suite directly against
+`$DISPLAY` (it grabs the server, warps the pointer, changes pointer/screensaver/
+access-control settings), so it warns and prompts for confirmation — pass
+`--yes` or set `XTS_YES=1` to skip the prompt. It works via `XTS_XSERVER=none`,
+which tells the harness to use the existing `$DISPLAY` instead of spawning.
+
 ## GitHub Actions (in the xserver repo)
 
 Add a step to the job that already builds the server — same checkout, no artifact
