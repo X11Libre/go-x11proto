@@ -8,7 +8,7 @@ import (
 )
 
 func TestCursor(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 
 	src, err := rpc.CreatePixmap(c, 1, c.DefaultRoot(), 16, 16)
@@ -29,7 +29,7 @@ func TestCursor(t *testing.T) {
 }
 
 func TestGetMotionEvents(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	if _, err := rpc.GetMotionEvents(c, c.DefaultRoot(), 0, 0); err != nil {
 		t.Errorf("GetMotionEvents: %v", err)

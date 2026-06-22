@@ -24,7 +24,7 @@ func (fakeRenderer) Measure(scale int, s string) (int, int) { return len(s) * sc
 
 // TestTkWindowOps exercises the tk Window operations against a live server.
 func TestTkWindowOps(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	tk := tk_core.MakeTkConn(c)
 
@@ -78,7 +78,7 @@ func TestTkWindowOps(t *testing.T) {
 
 // TestTkDrawableOps exercises the tk Drawable operations on a pixmap.
 func TestTkDrawableOps(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	tk := tk_core.MakeTkConn(c)
 
@@ -112,7 +112,7 @@ func TestTkDrawableOps(t *testing.T) {
 
 // TestTkGC exercises the tk GC resource wrapper.
 func TestTkGC(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	tk := tk_core.MakeTkConn(c)
 
@@ -135,7 +135,7 @@ func TestTkGC(t *testing.T) {
 
 // TestTkPixmap exercises the tk Pixmap wrapper and its embedded Drawable methods.
 func TestTkPixmap(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	tk := tk_core.MakeTkConn(c)
 	depth := screen(c).RootDepth
@@ -163,7 +163,7 @@ func TestTkPixmap(t *testing.T) {
 
 // TestTkInternAtom verifies TkConn.InternAtom resolves and caches atoms.
 func TestTkInternAtom(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	tk := tk_core.MakeTkConn(c)
 
@@ -186,7 +186,7 @@ func TestTkInternAtom(t *testing.T) {
 
 // TestTkSetBackgroundPixmap exercises Window.SetBackgroundPixmap.
 func TestTkSetBackgroundPixmap(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	tk := tk_core.MakeTkConn(c)
 
@@ -211,7 +211,7 @@ func TestTkSetBackgroundPixmap(t *testing.T) {
 
 // TestTkLabel exercises the generic Label widget (transparent overlay).
 func TestTkLabel(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	tk := tk_core.MakeTkConn(c)
 	gc := newGC(t, c)

@@ -10,7 +10,7 @@ import (
 )
 
 func TestAtoms(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 
 	a, err := rpc.InternAtom(c, "GO_X11_TEST_ATOM")
@@ -35,7 +35,7 @@ func TestAtoms(t *testing.T) {
 }
 
 func TestProperties(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	w := createWin(t, c, request.CW_EVENT_MASK, &request.CreateWindowRequest{Width: 10, Height: 10})
 
@@ -79,7 +79,7 @@ func containsAtom(s []base.ATOM, a base.ATOM) bool {
 }
 
 func TestSelections(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	w := createWin(t, c, request.CW_EVENT_MASK, &request.CreateWindowRequest{Width: 10, Height: 10})
 	sel, _ := rpc.InternAtom(c, "GO_X11_SEL")

@@ -8,7 +8,7 @@ import (
 )
 
 func TestFontListing(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	// these must not error even when the server has no font path
 	if _, err := rpc.GetFontPath(c); err != nil {
@@ -23,7 +23,7 @@ func TestFontListing(t *testing.T) {
 }
 
 func TestFontOpen(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	fonts, err := rpc.ListFonts(c, 1, "*")
 	must(t, err, "ListFonts")

@@ -7,7 +7,7 @@ import (
 )
 
 func TestCreateWindow1(t *testing.T) {
-	conn := connectBE(t)
+	conn := connect(t)
 	defer conn.Close()
 
 	window, err := rpc.CreateWindow1(

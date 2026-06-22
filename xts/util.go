@@ -32,9 +32,17 @@ func expectError(t *testing.T, c *core.X11Conn, req base.Request, code byte, wha
 	}
 }
 
-func connect(t *testing.T, be bool) *core.X11Conn {
-	// retry a few times: a freshly started Xvfb (or a busy one) occasionally
-	// drops a connection during the handshake.
+// connBE selects the client byte order used by connect(). The harness flips it
+// between test passes (see TestMain), so the whole suite runs in both
+// little-endian and big-endian mode when run against a spawned server. Defaults
+// to little-endian.
+var connBE bool
+
+// dial opens a connection with the given client byte order, retrying briefly: a
+// freshly started Xvfb (or a busy one) occasionally drops a connection during
+// the handshake.
+func dial(t *testing.T, be bool) *core.X11Conn {
+	t.Helper()
 	var err error
 	for attempt := 0; attempt < 5; attempt++ {
 		var conn *core.X11Conn
@@ -48,13 +56,8 @@ func connect(t *testing.T, be bool) *core.X11Conn {
 	return nil
 }
 
-func connectLE(t *testing.T) *core.X11Conn {
-	return connect(t, false)
-}
-
-func connectBE(t *testing.T) *core.X11Conn {
-	return connect(t, true)
-}
+// connect opens a connection in the byte order currently under test.
+func connect(t *testing.T) *core.X11Conn { return dial(t, connBE) }
 
 func waitForEvent(t *testing.T, conn *core.X11Conn, chk func(*testing.T, events.Event) bool) {
 	timer := time.NewTimer(2 * time.Second)

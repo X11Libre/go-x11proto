@@ -9,7 +9,7 @@ import (
 )
 
 func TestColors(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	cmap := screen(c).Colormap
 
@@ -25,7 +25,7 @@ func TestColors(t *testing.T) {
 }
 
 func TestColormapLifecycle(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	mid, err := rpc.CreateColormap(c, request.ColormapAllocNone, c.DefaultRoot(), screen(c).RootVisual)
 	must(t, err, "CreateColormap")

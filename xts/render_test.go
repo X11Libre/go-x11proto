@@ -11,7 +11,7 @@ import (
 
 // TestRender exercises the RENDER extension end to end against the server.
 func TestRender(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 
 	rdr, err := render.Query(c)

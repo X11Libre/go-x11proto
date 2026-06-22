@@ -8,7 +8,7 @@ import (
 )
 
 func TestPointerKeyboardQueries(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	root := c.DefaultRoot()
 
@@ -48,7 +48,7 @@ func TestPointerKeyboardQueries(t *testing.T) {
 }
 
 func TestFocusCoordsMisc(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	root := c.DefaultRoot()
 
@@ -64,7 +64,7 @@ func TestFocusCoordsMisc(t *testing.T) {
 }
 
 func TestGrabs(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	root := c.DefaultRoot()
 	w := createWin(t, c, request.CW_EVENT_MASK, &request.CreateWindowRequest{Width: 100, Height: 100})
@@ -98,7 +98,7 @@ func TestGrabs(t *testing.T) {
 }
 
 func TestExtensionsAndHosts(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	if _, err := rpc.ListExtensions(c); err != nil {
 		t.Errorf("ListExtensions: %v", err)

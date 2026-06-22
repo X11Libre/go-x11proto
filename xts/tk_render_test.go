@@ -11,7 +11,7 @@ import (
 
 // TestTkRender exercises the tk RENDER abstraction end to end.
 func TestTkRender(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	tk := tk_core.MakeTkConn(c)
 

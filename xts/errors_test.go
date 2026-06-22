@@ -24,7 +24,7 @@ func (badOpcodeRequest) WriteInto(w *base.RequestWriter) error {
 // wire level; the high-level API always emits correct lengths, so those are not
 // reproducible here.)
 func TestProtocolErrors(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	root := c.DefaultRoot()
 

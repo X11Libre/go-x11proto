@@ -9,7 +9,7 @@ import (
 )
 
 func TestGCOps(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	gc := newGC(t, c)
 
@@ -27,7 +27,7 @@ func TestGCOps(t *testing.T) {
 }
 
 func TestDrawingPrimitives(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	pm := newPixmap(t, c, 100, 100)
 	gc := newGC(t, c)
@@ -47,7 +47,7 @@ func TestDrawingPrimitives(t *testing.T) {
 }
 
 func TestCopyAreaAndPlane(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	src := newPixmap(t, c, 50, 50)
 	dst := newPixmap(t, c, 50, 50)
@@ -63,7 +63,7 @@ func TestCopyAreaAndPlane(t *testing.T) {
 }
 
 func TestPutGetImageRoundTrip(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	depth := screen(c).RootDepth
 	if depth != 24 {
@@ -99,7 +99,7 @@ func TestPutGetImageRoundTrip(t *testing.T) {
 }
 
 func TestClearArea(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	w := createWin(t, c, request.CW_BACKGROUND_PIXEL,
 		&request.CreateWindowRequest{Width: 100, Height: 100, BackPixel: c.DefaultWhitePixel()})

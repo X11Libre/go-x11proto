@@ -12,7 +12,7 @@ import (
 // TestMiscRequests covers XTS-listed requests that the rest of the suite did
 // not yet exercise (happy path) and that are safe against the throwaway server.
 func TestMiscRequests(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	root := c.DefaultRoot()
 
@@ -56,7 +56,7 @@ func TestMiscRequests(t *testing.T) {
 // TestServerControlRequests covers the global-state setters (safe on the
 // throwaway server). XTS exercises these; we set benign values.
 func TestServerControlRequests(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 
 	must(t, rpc.SetScreenSaver(c, 0, 0, 2, 2), "SetScreenSaver") // default blanking/exposures
@@ -76,7 +76,7 @@ func TestServerControlRequests(t *testing.T) {
 // TestTextAndGlyphCursor covers font-dependent requests, skipped if the needed
 // fonts are unavailable on the server.
 func TestTextAndGlyphCursor(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 
 	if font, err := rpc.OpenFont(c, "fixed"); err == nil {

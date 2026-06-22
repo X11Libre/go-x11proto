@@ -31,20 +31,46 @@ import (
 func TestMain(m *testing.M) {
 	switch strings.ToLower(os.Getenv("XTS_XSERVER")) {
 	case "none", "off", "-":
+		// existing $DISPLAY: a single pass in the client's natural order
 		fmt.Fprintf(os.Stderr, "xts: using existing DISPLAY=%q (no server spawned)\n", os.Getenv("DISPLAY"))
-		os.Exit(m.Run())
+		os.Exit(runPasses(m, false))
 	}
 
 	srv, restore, err := startXServer()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xts: X server unavailable (%v); using DISPLAY=%q\n", err, os.Getenv("DISPLAY"))
-		os.Exit(m.Run())
+		os.Exit(runPasses(m, false))
 	}
-	code := m.Run()
+	// against a spawned server, exercise both client byte orders
+	code := runPasses(m, true)
 	restore()
 	_ = srv.Process.Kill()
 	_, _ = srv.Process.Wait()
 	os.Exit(code)
+}
+
+// runPasses runs the whole suite once per client byte order, flipping the global
+// connBE that connect() reads. When bothOrders is false only little-endian is
+// run (the local/existing-$DISPLAY case). It returns a non-zero code if any pass
+// failed.
+func runPasses(m *testing.M, bothOrders bool) int {
+	type pass struct {
+		name string
+		be   bool
+	}
+	passes := []pass{{"little-endian", false}}
+	if bothOrders {
+		passes = append(passes, pass{"big-endian", true})
+	}
+	code := 0
+	for _, p := range passes {
+		connBE = p.be
+		fmt.Fprintf(os.Stderr, "xts: ===== byte order: %s =====\n", p.name)
+		if c := m.Run(); c != 0 {
+			code = c
+		}
+	}
+	return code
 }
 
 // startXServer launches the configured X server on a server-assigned display,

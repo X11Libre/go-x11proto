@@ -5,24 +5,16 @@ import (
 	"testing"
 )
 
-func TestInternAtomLE(t *testing.T) {
-	conn := connectLE(t)
+// TestInternAtom runs in whatever byte order the current pass uses, so the
+// harness exercises it in both little- and big-endian mode against a spawned
+// server (see TestMain).
+func TestInternAtom(t *testing.T) {
+	conn := connect(t)
 	defer conn.Close()
 
 	if atom, err := rpc.InternAtom(conn, "XLIBRE_GO_X11"); err != nil {
-		t.Errorf("InternAtom: failed: %s", err)
+		t.Errorf("InternAtom failed: %s", err)
 	} else {
-		t.Logf("Created atom: %d\n", atom)
-	}
-}
-
-func TestInternAtomBE(t *testing.T) {
-	conn := connectBE(t)
-	defer conn.Close()
-
-	if atom, err := rpc.InternAtom(conn, "XLIBRE_GO_X11"); err != nil {
-		t.Errorf("InternAtom (BE) failed: %s", err)
-	} else {
-		t.Logf("Created atom (BE): %d\n", atom)
+		t.Logf("created atom: %d", atom)
 	}
 }

@@ -23,7 +23,7 @@ func createWin(t *testing.T, c *core.X11Conn, mask base.CARD32, r *request.Creat
 }
 
 func TestWindowGeometryRoundTrip(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 
 	w := createWin(t, c, request.CW_BACKGROUND_PIXEL|request.CW_EVENT_MASK,
@@ -55,7 +55,7 @@ func TestWindowGeometryRoundTrip(t *testing.T) {
 }
 
 func TestConfigureWindow(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	w := createWin(t, c, request.CW_BACKGROUND_PIXEL,
 		&request.CreateWindowRequest{Width: 100, Height: 50, BackPixel: c.DefaultBlackPixel()})
@@ -77,7 +77,7 @@ func TestConfigureWindow(t *testing.T) {
 }
 
 func TestChangeWindowAttributes(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	w := createWin(t, c, request.CW_EVENT_MASK,
 		&request.CreateWindowRequest{Width: 50, Height: 50, EventMask: 0})
@@ -89,7 +89,7 @@ func TestChangeWindowAttributes(t *testing.T) {
 }
 
 func TestReparentAndSubwindows(t *testing.T) {
-	c := connectLE(t)
+	c := connect(t)
 	defer c.Close()
 	parent := createWin(t, c, request.CW_EVENT_MASK,
 		&request.CreateWindowRequest{Width: 200, Height: 200, EventMask: 0})
