@@ -75,6 +75,20 @@ Legend:
 |--------|-------|--------|------|
 | `Label` | single line of centred text via a pluggable `TextRenderer`; optional ParentRelative ("transparent") background | OK | `TestTkLabel` (Init / Draw / SetText / transparent) |
 
+## RENDER (tk/render)
+
+tk-layer wrapper over `proto/ext/render` (the RENDER extension).
+
+| API | Wraps | Status | Test |
+|-----|-------|--------|------|
+| `Open` / `Version` | QueryExtension + QueryVersion | OK | `TestTkRender` |
+| `Formats` / `StandardFormat` / `ARGB32` / `RGB24` | QueryPictFormats (+ cache) | RT | `TestTkRender` (ARGB32 found) |
+| `NewPicture` / `PictureFor` | CreatePicture | OK | `TestTkRender` |
+| `Picture.Fill` / `FillRect` | FillRectangles | RT | `TestTkRender` (fill verified via GetImage) |
+| `Picture.Composite` | Composite | OK | `TestTkRender` |
+| `Picture.Change` | ChangePicture | OK | `TestTkRender` |
+| `Picture.Free` | FreePicture | OK | `TestTkRender` |
+
 ## Notes
 
 - The text methods (`PutText8`, `ImageText8/16`, `PolyText16`) need an opened
