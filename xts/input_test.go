@@ -103,8 +103,10 @@ func TestExtensionsAndHosts(t *testing.T) {
 	if _, err := rpc.ListExtensions(c); err != nil {
 		t.Errorf("ListExtensions: %v", err)
 	}
-	if _, err := rpc.QueryExtension(c, "BIG-REQUESTS"); err != nil {
+	if ext, err := rpc.QueryExtension(c, "BIG-REQUESTS"); err != nil {
 		t.Errorf("QueryExtension: %v", err)
+	} else if !ext.Present {
+		t.Error("QueryExtension: BIG-REQUESTS reported absent (should be present)")
 	}
 	if _, err := rpc.ListHosts(c); err != nil {
 		t.Errorf("ListHosts: %v", err)

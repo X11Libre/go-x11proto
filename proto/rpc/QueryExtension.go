@@ -8,6 +8,7 @@ import (
 
 type ExtensionInfo struct {
 	Name        string
+	Present     bool
 	MajorOpcode base.CARD8
 	FirstEvent  base.CARD8
 	FirstError  base.CARD8
@@ -30,6 +31,7 @@ func QueryExtension(c *core.X11Conn, name string) (ExtensionInfo, error) {
 
 	return ExtensionInfo{
 		Name:        name,
+		Present:     rep.Present,
 		MajorOpcode: rep.MajorOpcode,
 		FirstEvent:  rep.FirstEvent,
 		FirstError:  rep.FirstError,

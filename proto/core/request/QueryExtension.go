@@ -26,7 +26,9 @@ type QueryExtensionReply struct {
 }
 
 func (reply *QueryExtensionReply) Parse(reader base.ReplyReader) error {
-	reply.Present = reader.Data0 != 0
+	// present/major-opcode/first-event/first-error are the first four payload
+	// bytes (reply offsets 8..11); byte 1 (Data0) is unused in this reply.
+	reply.Present = reader.CARD8() != 0
 	reply.MajorOpcode = reader.CARD8()
 	reply.FirstEvent = reader.CARD8()
 	reply.FirstError = reader.CARD8()

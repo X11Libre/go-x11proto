@@ -119,7 +119,9 @@ func TestQueryExtensionEncode(t *testing.T) {
 
 func TestQueryExtensionReply(t *testing.T) {
 	got := &QueryExtensionReply{}
-	if err := got.Parse(makeReply(1, 0, cat(u8(128), u8(64), u8(65), make([]byte, 21)))); err != nil {
+	// reply payload (offset 8): present, major-opcode, first-event, first-error;
+	// data0 (byte 1) is unused.
+	if err := got.Parse(makeReply(0, 0, cat(u8(1), u8(128), u8(64), u8(65), make([]byte, 20)))); err != nil {
 		t.Fatal(err)
 	}
 	checkReply(t, got, &QueryExtensionReply{Present: true, MajorOpcode: 128, FirstEvent: 64, FirstError: 65})
