@@ -1,15 +1,36 @@
 package xts
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core"
+	"github.com/X11Libre/go-x11proto/proto/core/errorcode"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
 	"github.com/X11Libre/go-x11proto/proto/core/setup"
 	"github.com/X11Libre/go-x11proto/proto/rpc"
 )
+
+// expectError sends req and asserts the server rejects it with the given X
+// error code (see proto/core/errorcode).
+func expectError(t *testing.T, c *core.X11Conn, req base.Request, code byte, what string) {
+	t.Helper()
+	err := c.CheckRequest(req)
+	if err == nil {
+		t.Errorf("%s: expected %s, got success", what, errorcode.Name(code))
+		return
+	}
+	var re *core.RequestError
+	if !errors.As(err, &re) {
+		t.Errorf("%s: expected %s, got non-protocol error: %v", what, errorcode.Name(code), err)
+		return
+	}
+	if byte(re.Code) != code {
+		t.Errorf("%s: expected %s, got %s", what, errorcode.Name(code), errorcode.Name(byte(re.Code)))
+	}
+}
 
 func connect(t *testing.T, be bool) *core.X11Conn {
 	// retry a few times: a freshly started Xvfb (or a busy one) occasionally

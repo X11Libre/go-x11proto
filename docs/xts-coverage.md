@@ -17,7 +17,7 @@ Legend:
 | 2 | ChangeWindowAttributes | OK | `TestChangeWindowAttributes` |
 | 3 | GetWindowAttributes | RT | class verified |
 | 4 | DestroyWindow | OK | several |
-| 5 | DestroySubwindows | — | not yet covered |
+| 5 | DestroySubwindows | OK | `TestMiscRequests` |
 | 6 | ChangeSaveSet | OK | `TestReparentAndSubwindows` (insert+delete) |
 | 7 | ReparentWindow | RT | parent verified via QueryTree |
 | 8 | MapWindow | OK | several |
@@ -41,18 +41,18 @@ Legend:
 | 21 | ListProperties | RT | membership verified |
 | 22 | SetSelectionOwner | OK | `TestSelections` |
 | 23 | GetSelectionOwner | RT | owner verified |
-| 24 | ConvertSelection | — | needs a responding selection owner |
+| 24 | ConvertSelection | OK | `TestMiscRequests` (no owner → SelectionNotify None) |
 
 ## Grabs & events (25–37)
 
 | # | Request | Status | Test / reason |
 |---|---------|--------|---------------|
-| 25 | SendEvent | — | unit-tested in `proto/core/request`; exercised by the tetris fullscreen toggle |
+| 25 | SendEvent | OK | `TestMiscRequests` (synthetic ClientMessage to root) |
 | 26 | GrabPointer | RT | status verified |
 | 27 | UngrabPointer | OK | `TestGrabs` |
 | 28 | GrabButton | OK | `TestGrabs` |
 | 29 | UngrabButton | OK | `TestGrabs` |
-| 30 | ChangeActivePointerGrab | — | not yet covered |
+| 30 | ChangeActivePointerGrab | OK | `TestMiscRequests` |
 | 31 | GrabKeyboard | RT | status verified |
 | 32 | UngrabKeyboard | OK | `TestGrabs` |
 | 33 | GrabKey | OK | `TestGrabs` |
@@ -70,7 +70,7 @@ Legend:
 | 40 | TranslateCoordinates | RT | translated coords verified |
 | 41 | WarpPointer | OK | `TestFocusCoordsMisc` |
 | 42 | SetInputFocus | OK | `TestFocusCoordsMisc` |
-| 43 | GetInputFocus | — | no rpc/reply wrapper (used internally as a round-trip barrier) |
+| 43 | GetInputFocus | OK | `TestMiscRequests` |
 | 44 | QueryKeymap | RT | 32-byte keymap verified |
 
 ## Fonts (45–52)
@@ -118,7 +118,7 @@ Legend:
 | 73 | GetImage | RT | pixel data verified against PutImage |
 | 74 | PolyText8 | — | needs a font; unit-tested in `proto/core/request` |
 | 75 | PolyText16 | — | needs a font; unit-tested in `proto/core/request` |
-| 76 | ImageText8 | — | needs a font; unit-tested in `proto/core/request` |
+| 76 | ImageText8 | OK | `TestTextAndGlyphCursor` (skipped if no font) |
 | 77 | ImageText16 | — | needs a font; unit-tested in `proto/core/request` |
 
 ## Colormaps & colours (78–92)
@@ -127,7 +127,7 @@ Legend:
 |---|---------|--------|---------------|
 | 78 | CreateColormap | OK | `TestColormapLifecycle` |
 | 79 | FreeColormap | OK | `TestColormapLifecycle` |
-| 80 | CopyColormapAndFree | — | not yet covered |
+| 80 | CopyColormapAndFree | OK | `TestMiscRequests` |
 | 81 | InstallColormap | OK | `TestColormapLifecycle` |
 | 82 | UninstallColormap | OK | `TestColormapLifecycle` |
 | 83 | ListInstalledColormaps | RT | non-empty list verified |
@@ -146,7 +146,7 @@ Legend:
 | # | Request | Status | Test / reason |
 |---|---------|--------|---------------|
 | 93 | CreateCursor | OK | `TestCursor` |
-| 94 | CreateGlyphCursor | — | needs the "cursor" font |
+| 94 | CreateGlyphCursor | OK | `TestTextAndGlyphCursor` (skipped if no "cursor" font) |
 | 95 | FreeCursor | OK | `TestCursor` |
 | 96 | RecolorCursor | OK | `TestCursor` |
 
@@ -162,29 +162,61 @@ Legend:
 | 102 | ChangeKeyboardControl | — | mutates global state |
 | 103 | GetKeyboardControl | OK | `TestPointerKeyboardQueries` |
 | 104 | Bell | OK | `TestFocusCoordsMisc` |
-| 105 | ChangePointerControl | — | mutates global state |
+| 105 | ChangePointerControl | OK | `TestServerControlRequests` |
 | 106 | GetPointerControl | OK | `TestPointerKeyboardQueries` |
-| 107 | SetScreenSaver | — | mutates global state |
+| 107 | SetScreenSaver | OK | `TestServerControlRequests` |
 | 108 | GetScreenSaver | OK | `TestPointerKeyboardQueries` |
-| 109 | ChangeHosts | — | mutates access control |
+| 109 | ChangeHosts | OK | `TestServerControlRequests` (insert + delete) |
 | 110 | ListHosts | OK | `TestExtensionsAndHosts` |
-| 111 | SetAccessControl | — | mutates access control |
-| 112 | SetCloseDownMode | — | affects client teardown |
+| 111 | SetAccessControl | OK | `TestServerControlRequests` (enable + restore) |
+| 112 | SetCloseDownMode | OK | `TestServerControlRequests` |
 | 113 | KillClient | — | destroys clients |
 | 114 | RotateProperties | OK | `TestProperties` |
-| 115 | ForceScreenSaver | — | mutates global state |
+| 115 | ForceScreenSaver | OK | `TestServerControlRequests` |
 | 116 | SetPointerMapping | — | mutates global state |
 | 117 | GetPointerMapping | OK | `TestPointerKeyboardQueries` |
 | 118 | SetModifierMapping | — | mutates global state |
 | 119 | GetModifierMapping | RT | keycodes-per-modifier verified |
 | 127 | NoOperation | OK | `TestFocusCoordsMisc` |
 
+## Error-condition coverage (XTS parity)
+
+Xorg's XTS (`xts5/Xproto`) devotes most of its per-request tests to error
+conformance. `TestProtocolErrors` reproduces the **semantic** error checks by
+driving a minimal bad request through `X11Conn.CheckRequest` (which reports the
+server's `*core.RequestError`, including its `errorcode`) and asserting the
+exact code:
+
+| X error | provoked by |
+|---------|-------------|
+| BadRequest | request with an unassigned major opcode (200) |
+| BadValue | GetImage with an invalid `format` |
+| BadWindow | GetWindowAttributes on an unallocated id |
+| BadPixmap | FreePixmap on an unallocated id |
+| BadAtom | GetAtomName(0) |
+| BadCursor | FreeCursor on an unallocated id |
+| BadFont | CloseFont on a non-font id |
+| BadMatch | GetImage rectangle exceeding the drawable |
+| BadDrawable | GetGeometry on an unallocated id |
+| BadColor | FreeColormap on an unallocated id |
+| BadGC | FreeGC on an unallocated id |
+| BadIDChoice | CreatePixmap reusing an in-use id |
+
+Not reproduced: **BadLength** (XTS sends truncated requests at the wire level;
+the high-level API always emits correct lengths, so it is neither reproducible
+nor meaningful here), and **BadAccess / BadAlloc / BadName** (hard to trigger
+deterministically / environment-dependent — e.g. dynamic-visual colormap cells,
+the RGB colour database).
+
 ## Notes
 
-- The **—** rows fall into: mutating global/server state (keyboard/pointer
-  control, screensaver, hosts, font path, mappings), destroying clients
-  (KillClient, SetCloseDownMode), needing capabilities Xvfb's default visual or
-  font set lacks (dynamic-visual colour cells, named colours, glyph cursors,
-  text rendering), or having no rpc/reply wrapper yet (GetInputFocus). All
-  requests — including the untested-live ones — have byte-level encode/decode
-  unit tests in `proto/core/request`.
+- The remaining **—** rows are: dynamic-visual colour ops (cells/planes/store,
+  needing a non-static visual Xvfb lacks), named colours (RGB database), the
+  remaining keyboard/pointer mapping setters (ChangeKeyboardMapping,
+  Set{Pointer,Modifier}Mapping, ChangeKeyboardControl, SetFontPath — need
+  carefully-constructed valid arguments) and the client-destroying KillClient.
+  All requests — including the untested-live ones — have byte-level
+  encode/decode unit tests in `proto/core/request`.
+- Request set: XTS's `xts5/Xproto` covers the same ~120 core requests; the live
+  happy-path + the error table above bring this suite to broad parity with it,
+  excluding the wire-level BadLength purposes noted above.
