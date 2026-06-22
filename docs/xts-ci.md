@@ -54,9 +54,9 @@ extra args to override the default screen, and pass `GOTESTFLAGS` through):
 parent `$DISPLAY` to show their window but still isolate the tests in the nested
 server. `run-local.sh` runs the **destructive** suite directly against
 `$DISPLAY` (it grabs the server, warps the pointer, changes pointer/screensaver/
-access-control settings), so it warns and prompts for confirmation — pass
-`--yes` or set `XTS_YES=1` to skip the prompt. It works via `XTS_XSERVER=none`,
-which tells the harness to use the existing `$DISPLAY` instead of spawning.
+access-control settings); it prints a warning and then just runs. It works via
+`XTS_XSERVER=none`, which tells the harness to use the existing `$DISPLAY`
+instead of spawning.
 
 ## GitHub Actions (in the xserver repo)
 
