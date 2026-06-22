@@ -3,43 +3,60 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  build-and-test:
+  # static checks: build, formatting, vet (no X server needed)
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-
-      - name: Install Xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils
-
-      - name: Start Xvfb
-        run: Xvfb :99 -screen 0 1024x768x24 & sleep 1
-
       - name: Build
         run: go build ./...
-        env:
-          DISPLAY: ":99"
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
 
-      - name: Test
+  # full suite: offline unit tests + the live xts tests. The xts harness spawns
+  # its own Xvfb and runs every test in BOTH client byte orders (LE and BE).
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils
+      - name: Start fallback Xvfb
+        run: Xvfb :99 -screen 0 1280x1024x24 & sleep 1
+      - name: make test
         run: make test
         env:
           DISPLAY: ":99"
 
-  # Demonstrates / validates the xserver-CI entrypoint: run the live XTS suite
-  # against a specific server binary via contrib/xts/run-xts.sh (the same way
-  # the XLibre xserver CI is meant to invoke it - see docs/xts-ci.md). Here the
-  # "built server" is just the distro Xvfb.
-  xts-against-server:
+  # exercise the helper scripts and a second server implementation: run the live
+  # suite against a freshly spawned Xvfb (headless) and against Xephyr (nested in
+  # a parent Xvfb) - both via contrib/xts, both byte orders.
+  xts-scripts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - name: Install Xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-      - name: Run XTS against the server
-        run: ./contrib/xts/run-xts.sh "$(command -v Xvfb)"
+      - name: Install Xvfb + Xephyr
+        run: sudo apt-get update && sudo apt-get install -y xvfb xserver-xephyr
+      - name: Start parent Xvfb (for Xephyr)
+        run: Xvfb :99 -screen 0 1280x1024x24 & sleep 1
+      - name: XTS against a spawned Xvfb
+        run: ./contrib/xts/run-xvfb.sh
+      - name: XTS against a spawned Xephyr
+        run: ./contrib/xts/run-xephyr.sh
+        env:
+          DISPLAY: ":99"

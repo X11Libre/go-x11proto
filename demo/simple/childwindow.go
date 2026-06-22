@@ -42,8 +42,8 @@ func (w *ChildWindow) HandleWindowEvent(ev events.Event) bool {
 		w.FillRects(
 			w.Gc_black,
 			[]base.Rectangle{
-				{5, 60, 50, 50},
-				{60, 60, 50, 50},
+				{X: 5, Y: 60, Width: 50, Height: 50},
+				{X: 60, Y: 60, Width: 50, Height: 50},
 			},
 		)
 		w.PutText8(
