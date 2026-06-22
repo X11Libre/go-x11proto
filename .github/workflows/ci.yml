@@ -27,3 +27,19 @@ jobs:
         run: make test
         env:
           DISPLAY: ":99"
+
+  # Demonstrates / validates the xserver-CI entrypoint: run the live XTS suite
+  # against a specific server binary via contrib/xts/run-xts.sh (the same way
+  # the XLibre xserver CI is meant to invoke it - see docs/xts-ci.md). Here the
+  # "built server" is just the distro Xvfb.
+  xts-against-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Run XTS against the server
+        run: ./contrib/xts/run-xts.sh "$(command -v Xvfb)"
