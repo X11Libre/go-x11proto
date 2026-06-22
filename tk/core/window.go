@@ -122,8 +122,14 @@ func (w Window) ClearArea(x, y base.INT16, width, height base.CARD16, exposures 
 	return rpc.ClearArea(w.Conn.X11Conn, w.XID, x, y, width, height, exposures)
 }
 
-// SetBackgroundPixmap sets the window's background to the given pixmap. The
-// change takes effect on the next repaint (e.g. after ClearArea).
+// ParentRelative is the special background-pixmap value that makes a window use
+// its parent's background: the parent's background shows through wherever the
+// window itself does not paint, giving a "transparent" overlay.
+const ParentRelative base.PIXMAP = 1
+
+// SetBackgroundPixmap sets the window's background to the given pixmap (or the
+// special value ParentRelative). The change takes effect on the next repaint
+// (e.g. after ClearArea).
 func (w Window) SetBackgroundPixmap(pm base.PIXMAP) error {
 	return rpc.SetWindowBackgroundPixmap(w.Conn.X11Conn, w.XID, pm)
 }

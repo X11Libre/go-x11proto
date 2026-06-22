@@ -69,6 +69,12 @@ Legend:
 | `Pixmap.Free` | FreePixmap | OK | `TestTkPixmap` |
 | `Pixmap` (drawing / copy / query) | *embeds Drawable* | RT | `TestTkPixmap` (GetGeometry verified) |
 
+## Widgets (tk/widget)
+
+| Widget | Notes | Status | Test |
+|--------|-------|--------|------|
+| `Label` | single line of centred text via a pluggable `TextRenderer`; optional ParentRelative ("transparent") background | OK | `TestTkLabel` (Init / Draw / SetText / transparent) |
+
 ## Notes
 
 - The text methods (`PutText8`, `ImageText8/16`, `PolyText16`) need an opened

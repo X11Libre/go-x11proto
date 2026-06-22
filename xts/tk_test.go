@@ -4,11 +4,23 @@ import (
 	"testing"
 
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
+	tk_widget "github.com/X11Libre/go-x11proto/tk/widget"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
+	"github.com/X11Libre/go-x11proto/proto/core/events/event_mask"
 	"github.com/X11Libre/go-x11proto/proto/core/request"
 	"github.com/X11Libre/go-x11proto/proto/rpc"
 )
+
+// fakeRenderer is a trivial TextRenderer: it draws one filled block per
+// character, so the Label has something to paint without a real font.
+type fakeRenderer struct{}
+
+func (fakeRenderer) DrawText(d tk_core.Drawable, gc base.GC, x, y base.INT16, scale int, s string) error {
+	return d.FillRect(gc, x, y, base.CARD16(len(s)*scale), base.CARD16(scale))
+}
+
+func (fakeRenderer) Measure(scale int, s string) (int, int) { return len(s) * scale, scale }
 
 // TestTkWindowOps exercises the tk Window operations against a live server.
 func TestTkWindowOps(t *testing.T) {
@@ -195,4 +207,31 @@ func TestTkSetBackgroundPixmap(t *testing.T) {
 	must(t, rpc.FreeGC(c, gc), "FreeGC")
 	must(t, pm.Free(), "Pixmap.Free")
 	must(t, w.Destroy(), "Window.Destroy")
+}
+
+// TestTkLabel exercises the generic Label widget (transparent overlay).
+func TestTkLabel(t *testing.T) {
+	c := connectLE(t)
+	defer c.Close()
+	tk := tk_core.MakeTkConn(c)
+	gc := newGC(t, c)
+
+	lbl := &tk_widget.Label{
+		Window: tk_core.Window{
+			Drawable:  tk_core.Drawable{Conn: &tk},
+			ParentXID: c.DefaultRoot(),
+			W:         200, H: 40,
+			EventMask: event_mask.Exposure,
+		},
+		Text:        "HELLO",
+		Scale:       4,
+		Gc:          gc,
+		Renderer:    fakeRenderer{},
+		Transparent: true,
+	}
+	must(t, lbl.Init(), "Label.Init")
+	must(t, lbl.Draw(), "Label.Draw")
+	must(t, lbl.SetText("BYE"), "Label.SetText")
+	must(t, rpc.FreeGC(c, gc), "FreeGC")
+	must(t, lbl.Destroy(), "Label.Destroy")
 }
