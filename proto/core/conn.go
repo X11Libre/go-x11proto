@@ -205,7 +205,13 @@ func (c *X11Conn) handleError(header []byte) {
 	log.Printf("X11 Error: %s (code=%d), seq=%d, opcode=%d.%d, id=%d\n",
 		name, code, seq, majorOpcode, minorOpcode, badID)
 
-	err := c.errorF("x11 error code %d", code)
+	var err error = &RequestError{
+		Code:        base.CARD8(code),
+		Sequence:    base.CARD16(seq),
+		MajorOpcode: base.CARD8(majorOpcode),
+		MinorOpcode: base.CARD16(minorOpcode),
+		BadID:       base.CARD32(badID),
+	}
 
 	c.pendingMu.Lock()
 	if pr, ok := c.pending[base.CARD16(seq)]; ok {
