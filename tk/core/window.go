@@ -134,6 +134,20 @@ func (w Window) SetBackgroundPixmap(pm base.PIXMAP) error {
 	return rpc.SetWindowBackgroundPixmap(w.Conn.X11Conn, w.XID, pm)
 }
 
+// SetOverrideRedirect sets (or clears) the override-redirect attribute, which
+// tells the window manager to leave the window alone (no reparenting/decoration)
+// - used for popups, menus and tooltips. Call it before mapping.
+func (w Window) SetOverrideRedirect(on bool) error {
+	v := base.CARD32(0)
+	if on {
+		v = 1
+	}
+	return w.ChangeAttributes(&request.ChangeWindowAttributesRequest{
+		ValueMask:        request.CW_OVERRIDE_REDIRECT,
+		OverrideRedirect: v,
+	})
+}
+
 func (w Window) MapSubwindows() error {
 	return rpc.MapSubwindows(w.Conn.X11Conn, w.XID)
 }

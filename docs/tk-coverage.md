@@ -74,6 +74,8 @@ Legend:
 | Widget | Notes | Status | Test |
 |--------|-------|--------|------|
 | `Label` | single line of centred text via a pluggable `TextRenderer`; optional ParentRelative ("transparent") background | OK | `TestTkLabel` (Init / Draw / SetText / transparent) |
+| `Menu` | override-redirect popup; press-drag-release selection with pointer grab | OK | `TestTkMenu` (create / popup / close) |
+| `MenuBar` | horizontal title strip; a press pops up the title's `Menu` below it | OK | `TestTkMenu` |
 
 ## RENDER (tk/render)
 
