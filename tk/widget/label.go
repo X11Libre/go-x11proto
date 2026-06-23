@@ -18,10 +18,21 @@ type TextRenderer interface {
 	Measure(scale int, s string) (w, h int)
 }
 
-// Label is a window showing a single line of text, centred in the window and
-// drawn through a pluggable TextRenderer. With Transparent set it gives itself
-// a ParentRelative background, so the parent's content shows through the gaps
-// between glyphs — an overlay that paints only the text.
+// Align selects the horizontal placement of a Label's text. The zero value is
+// AlignCenter, preserving the original centred behaviour.
+type Align int
+
+const (
+	AlignCenter Align = iota
+	AlignLeft
+	AlignRight
+)
+
+// Label is a window showing a single line of text drawn through a pluggable
+// TextRenderer. The text is centred by default; set Align to AlignLeft (e.g.
+// for a status/filename line) or AlignRight. With Transparent set it gives
+// itself a ParentRelative background, so the parent's content shows through the
+// gaps between glyphs — an overlay that paints only the text.
 //
 // The embedded Window's W/H/X/Y/Parent/EventMask must be filled in before Init
 // (EventMask must include Exposure for the label to repaint itself). The caller
@@ -33,6 +44,8 @@ type Label struct {
 	Gc          base.GC
 	Renderer    TextRenderer
 	Transparent bool
+	Align       Align
+	PadX        int // left/right inset for AlignLeft/AlignRight (default 2)
 }
 
 // Init creates and maps the label. It installs the label as its own window
@@ -56,8 +69,8 @@ func (l *Label) SetText(s string) error {
 	return l.Draw()
 }
 
-// Draw clears the window and paints the text centred. It is called on Expose,
-// but may also be called directly.
+// Draw clears the window and paints the text according to Align. It is called
+// on Expose, but may also be called directly.
 func (l *Label) Draw() error {
 	if err := l.ClearArea(0, 0, 0, 0, false); err != nil {
 		return err
@@ -66,9 +79,26 @@ func (l *Label) Draw() error {
 		return nil
 	}
 	tw, th := l.Renderer.Measure(l.Scale, l.Text)
-	x := (int(l.W) - tw) / 2
+	x := alignX(l.Align, int(l.W), tw, l.PadX)
 	y := (int(l.H) - th) / 2
 	return l.Renderer.DrawText(l.Drawable, l.Gc, base.INT16(x), base.INT16(y), l.Scale, l.Text)
+}
+
+// alignX computes the text's left x for the given alignment in a window of
+// width winW, for text of width textW. pad (defaulting to 2) is the inset used
+// by the left/right alignments.
+func alignX(a Align, winW, textW, pad int) int {
+	if pad == 0 {
+		pad = 2
+	}
+	switch a {
+	case AlignLeft:
+		return pad
+	case AlignRight:
+		return winW - textW - pad
+	default: // AlignCenter
+		return (winW - textW) / 2
+	}
 }
 
 // HandleWindowEvent repaints the label on Expose.
