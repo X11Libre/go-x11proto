@@ -8,6 +8,7 @@ import (
 	tk_widget "github.com/X11Libre/go-x11proto/tk/widget"
 	"github.com/X11Libre/go-x11proto/tk/xpm"
 	"log"
+	"os"
 )
 
 //go:embed xlogo.xpm
@@ -18,6 +19,7 @@ type MyWindow struct {
 	Gc_black *tk_core.GC
 	font     base.FONT
 	bgPixmap base.PIXMAP
+	Menu     tk_widget.MenuBar
 	Win2     ChildWindow
 	Button   tk_widget.Button
 }
@@ -36,6 +38,29 @@ func (w *MyWindow) Init() {
 	}
 
 	w.Window.Map()
+
+	// popup menu bar across the top
+	w.Menu = tk_widget.MenuBar{
+		Window: tk_core.Window{
+			Drawable: tk_core.Drawable{Conn: w.Window.Conn},
+			Parent:   &w.Window,
+			X:        0, Y: 0, W: 500,
+		},
+	}
+	w.Menu.AddMenu("File", []tk_widget.MenuItem{
+		{Label: "Open", OnClick: func() { log.Printf("menu: File / Open\n") }},
+		{Label: "Save", OnClick: func() { log.Printf("menu: File / Save\n") }},
+		{Label: "Quit", OnClick: func() { log.Printf("menu: File / Quit\n"); os.Exit(0) }},
+	})
+	w.Menu.AddMenu("Edit", []tk_widget.MenuItem{
+		{Label: "Cut", OnClick: func() { log.Printf("menu: Edit / Cut\n") }},
+		{Label: "Copy", OnClick: func() { log.Printf("menu: Edit / Copy\n") }},
+		{Label: "Paste", OnClick: func() { log.Printf("menu: Edit / Paste\n") }},
+	})
+	w.Menu.AddMenu("Help", []tk_widget.MenuItem{
+		{Label: "About", OnClick: func() { log.Printf("menu: Help / About\n") }},
+	})
+	errPanic(w.Menu.Init(), "create menu bar")
 
 	w.Win2 = ChildWindow{
 		Window: tk_core.Window{
