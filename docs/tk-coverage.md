@@ -73,9 +73,41 @@ Legend:
 
 | Widget | Notes | Status | Test |
 |--------|-------|--------|------|
-| `Label` | single line of centred text via a pluggable `TextRenderer`; optional ParentRelative ("transparent") background | OK | `TestTkLabel` (Init / Draw / SetText / transparent) |
+| `Label` | single line of text via a pluggable `TextRenderer`; Align left/center/right; optional ParentRelative ("transparent") background | OK | `TestTkLabel`, `TestLabelAlignX` (offline) |
 | `Menu` | override-redirect popup with separators and cascading submenus; press-drag-release selection driven by one pointer grab on the top menu | OK | `TestTkMenu`, `TestTkContextMenu` (separators + 3-layer submenus) |
 | `MenuBar` | horizontal title strip; a press pops up the title's `Menu` below it | OK | `TestTkMenu` |
+| `Button` | labelled push button, up/down repaint, OnButtonPress | OK | exercised by the simple demo |
+| `TextView` | multi-line editable text: caret, insert/delete/nav, scroll, mouse selection + highlight; OnChange/OnScroll/OnSelect/OnKey hooks | OK | `TestTextView*` (offline editing/selection), `TestTkTextView` (live draw) |
+| `Scrollbar` | vertical track + thumb sized to the line range; click-to-page, drag-to-scroll; OnScroll | OK | `TestThumbGeom*` (offline), `TestTkScrollbar` (live, bound to a TextView) |
+| `Frame` | border layout (Top/Bottom/Left/Right/Center), re-lays children on resize | OK | `TestBorderLayout*` (offline), `TestTkFrame` (live geometry) |
+
+## Keyboard (tk/keyboard)
+
+Turns raw keycodes into keysyms/runes for text input.
+
+| API | Role | Status | Test |
+|-----|------|--------|------|
+| `Load` | snapshot the server keyboard mapping (GetKeyboardMapping over the setup range) | RT | `TestKeyboardMap` (live) |
+| `Map.Lookup` | keycode+state -> keysym, rune, logical Key; Shift/CapsLock case rules | OK | `TestLookup*` (offline), `TestKeyboardMap` (live 'a'/'A'/Enter) |
+
+## Font (tk/font)
+
+Core server font wrapped with metrics; a concrete `TextRenderer`.
+
+| API | Wraps | Status | Test |
+|-----|-------|--------|------|
+| `Open` / `Query` | OpenFont + QueryFont (metrics) | RT | `TestTkFont` |
+| `Height` / `TextWidth` / `RuneWidth` / `IndexAtX` | glyph advances for layout & caret hit-testing | OK | `TestTkFont` |
+| `DrawText` / `DrawTextBG` | PutText8 / ImageText8 (top-left positioned) | OK | `TestTkFont` (glyphs verified via GetImage) |
+
+## Clipboard (tk/clipboard)
+
+Text copy/paste over the PRIMARY/CLIPBOARD selections.
+
+| API | Wraps | Status | Test |
+|-----|-------|--------|------|
+| `Own` / `Serve` | SetSelectionOwner + answer SelectionRequest (UTF8_STRING/STRING/TARGETS) | OK | `TestTkClipboard` (live, two connections) |
+| `RequestText` / `GetText` | ConvertSelection + read the result property | RT | `TestTkClipboard`, `TestTkClipboardNoOwner` |
 
 ## XSETTINGS (tk/xsettings)
 
