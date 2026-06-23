@@ -45,3 +45,8 @@ func (g *GC) SetForeground(fg base.CARD32) error {
 func (g *GC) SetBackground(bg base.CARD32) error {
 	return g.Change(&request.ChangeGCRequest{ValueMask: request.GC_MASK_BACKGROUND, Background: bg})
 }
+
+// SetFont sets the font used for text-drawing requests (ImageText8 / PutText8).
+func (g *GC) SetFont(font base.FONT) error {
+	return g.Change(&request.ChangeGCRequest{ValueMask: request.GC_MASK_FONT, Font: font})
+}
