@@ -2,13 +2,15 @@ package main
 
 import (
 	_ "embed"
+	"log"
+	"os"
+
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
+	"github.com/X11Libre/go-x11proto/tk/theme"
 	tk_widget "github.com/X11Libre/go-x11proto/tk/widget"
 	"github.com/X11Libre/go-x11proto/tk/xpm"
-	"log"
-	"os"
 )
 
 //go:embed xlogo.xpm
@@ -23,6 +25,7 @@ type MyWindow struct {
 	Ctx      *tk_widget.Menu // right-click context menu
 	Win2     ChildWindow
 	Button   tk_widget.Button
+	Theme    *theme.Theme
 }
 
 func (w *MyWindow) Init() {
@@ -39,6 +42,23 @@ func (w *MyWindow) Init() {
 	}
 
 	w.Window.Map()
+
+	// Load desktop theme (Xft/DPI + Gtk/FontName from XSETTINGS), fall back to
+	// 96 dpi / "Sans 10" when no settings manager is running.
+	w.Theme = theme.Load(conn)
+	log.Printf("theme: %s", w.Theme)
+
+	fontid, err := w.Theme.OpenFont(conn)
+	errPanic(err, "OpenFont")
+	w.font = fontid
+
+	gcid, err := w.Window.Conn.CreateGC1(
+		conn.DefaultBlackPixel(),
+		conn.DefaultWhitePixel(),
+		w.font,
+	)
+	errPanic(err, "MyWindow => CreateGC1()")
+	w.Gc_black = gcid
 
 	// popup menu bar across the top
 	w.Menu = tk_widget.MenuBar{
@@ -126,23 +146,6 @@ func (w *MyWindow) Init() {
 }
 
 func (w *MyWindow) HandleWindowEvent(ev events.Event) bool {
-
-	if w.font.Invalid() {
-		fontid, err := w.Window.Conn.GetFont("fixed")
-		errPanic(err, "OpenFont")
-		w.font = fontid
-	}
-
-	if w.Gc_black == nil {
-		gcid, err := w.Window.Conn.CreateGC1(
-			w.Window.Conn.X11Conn.DefaultBlackPixel(),
-			w.Window.Conn.X11Conn.DefaultWhitePixel(),
-			w.font,
-		)
-		errPanic(err, "MyWindow => CreateGC1()")
-		w.Gc_black = gcid
-	}
-
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		w.FillRects(
