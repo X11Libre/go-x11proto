@@ -2,24 +2,31 @@ package xsettings
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core"
+	"github.com/X11Libre/go-x11proto/proto/core/atoms"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
 	"github.com/X11Libre/go-x11proto/proto/core/events/event_mask"
 	"github.com/X11Libre/go-x11proto/proto/core/request"
 	"github.com/X11Libre/go-x11proto/proto/rpc"
 )
 
-const propModeReplace = 0
+const (
+	propModeReplace = 0
+	propModeAppend  = 2
+)
 
 func selectionName(screen int) string { return fmt.Sprintf("_XSETTINGS_S%d", screen) }
 
 // Client reads the XSETTINGS published for a screen.
 type Client struct {
-	conn     *core.X11Conn
-	selAtom  base.ATOM
-	propAtom base.ATOM
+	conn       *core.X11Conn
+	selAtom    base.ATOM
+	propAtom   base.ATOM
+	managerWin base.WINDOW
+	onChange   func(*Settings)
 }
 
 // NewClient interns the atoms for the given screen's XSETTINGS.
@@ -60,6 +67,48 @@ func (c *Client) Get() (*Settings, error) {
 	return decode(data)
 }
 
+// Watch calls onChange whenever the settings change (and once now if a manager
+// is present). It selects PropertyChange on the manager window and registers a
+// handler, so the application must run the connection's event loop
+// (SimpleEventLoop / DeliverWindowEvent). It watches the manager that is running
+// at the time of the call; appearance of a new manager later is not tracked.
+func (c *Client) Watch(onChange func(*Settings)) error {
+	c.onChange = onChange
+	owner, err := c.ManagerWindow()
+	if err != nil {
+		return err
+	}
+	if owner == 0 {
+		return nil // no manager yet, nothing to watch
+	}
+	c.managerWin = owner
+	if err := rpc.ChangeWindowAttributes(c.conn, &request.ChangeWindowAttributesRequest{
+		Window:    owner,
+		ValueMask: request.CW_EVENT_MASK,
+		EventMask: base.CARD32(event_mask.PropertyChange),
+	}); err != nil {
+		return err
+	}
+	c.conn.RegisterWindowHandler(owner, c)
+	if s, err := c.Get(); err == nil && s != nil && onChange != nil {
+		onChange(s)
+	}
+	return nil
+}
+
+// HandleX11WindowEvent re-reads the settings and fires the Watch callback when
+// the manager's settings property changes.
+func (c *Client) HandleX11WindowEvent(window base.WINDOW, ev events.Event) bool {
+	pe, ok := ev.(*events.PropertyEvent)
+	if !ok || pe.Window != c.managerWin || base.ATOM(pe.Atom) != c.propAtom || pe.Deleted {
+		return true
+	}
+	if s, err := c.Get(); err == nil && s != nil && c.onChange != nil {
+		c.onChange(s)
+	}
+	return true
+}
+
 // readProperty fetches the whole _XSETTINGS_SETTINGS property (chunked).
 func (c *Client) readProperty(owner base.WINDOW) ([]byte, error) {
 	var out []byte
@@ -86,6 +135,7 @@ type Manager struct {
 	selAtom  base.ATOM
 	propAtom base.ATOM
 	mgrAtom  base.ATOM
+	time     base.CARD32 // timestamp used to acquire the selection
 	serial   uint32
 }
 
@@ -122,7 +172,10 @@ func NewManager(conn *core.X11Conn, screen int) (*Manager, error) {
 		return nil, err
 	}
 
-	if err := rpc.SetSelectionOwner(conn, win, sel, 0); err != nil {
+	m := &Manager{conn: conn, win: win, selAtom: sel, propAtom: prop, mgrAtom: mgr}
+	m.time = m.serverTimestamp() // a real timestamp; 0 (CurrentTime) on fallback
+
+	if err := rpc.SetSelectionOwner(conn, win, sel, m.time); err != nil {
 		_ = rpc.DestroyWindow(conn, win)
 		return nil, err
 	}
@@ -131,11 +184,32 @@ func NewManager(conn *core.X11Conn, screen int) (*Manager, error) {
 		return nil, fmt.Errorf("xsettings: failed to acquire %s", selectionName(screen))
 	}
 
-	m := &Manager{conn: conn, win: win, selAtom: sel, propAtom: prop, mgrAtom: mgr}
 	if err := m.announce(); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+// serverTimestamp obtains a current server time the proper way: a zero-length
+// property append on our window generates a PropertyNotify carrying the time.
+// It briefly reads the connection's event channel, so NewManager must be called
+// before the application starts its own event loop. Returns 0 (CurrentTime) if
+// no notify arrives in time.
+func (m *Manager) serverTimestamp() base.CARD32 {
+	if err := rpc.ChangeProperty8(m.conn, propModeAppend, m.win, m.propAtom, atoms.STRING, nil); err != nil {
+		return 0
+	}
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-m.conn.Events():
+			if pe, ok := ev.(*events.PropertyEvent); ok && pe.Window == m.win {
+				return pe.Timestamp
+			}
+		case <-timeout:
+			return 0
+		}
+	}
 }
 
 // Window is the manager's selection-owner window.
@@ -149,7 +223,7 @@ func (m *Manager) announce() error {
 		Window:      root,
 		MessageType: m.mgrAtom,
 		Format:      32,
-		Data:        [5]base.CARD32{0, base.CARD32(m.selAtom), base.CARD32(m.win), 0, 0},
+		Data:        [5]base.CARD32{m.time, base.CARD32(m.selAtom), base.CARD32(m.win), 0, 0},
 	}
 	_, err := m.conn.Send(&request.SendEventRequest{
 		Propagate:   false,

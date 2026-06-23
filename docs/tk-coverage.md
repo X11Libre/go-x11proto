@@ -84,8 +84,8 @@ colours) - the channel GTK/Qt use.
 
 | API | Role | Status | Test |
 |-----|------|--------|------|
-| `Client` (`Get` / `ManagerWindow` / accessors `DPI`/`FontName`/`ThemeName`/…) | read the published settings | RT | `TestXSettings` (values verified) |
-| `Manager` (`NewManager` / `Set` / `Close`) | own `_XSETTINGS_S<n>` + publish via the `_XSETTINGS_SETTINGS` property | OK | `TestXSettings` (live round-trip) |
+| `Client` (`Get` / `Watch` / `ManagerWindow` / accessors `DPI`/`FontName`/`ThemeName`/…) | read the published settings + live-watch changes | RT | `TestXSettings`, `TestXSettingsWatch` |
+| `Manager` (`NewManager` / `Set` / `Close`) | own `_XSETTINGS_S<n>` (real timestamp) + publish via the `_XSETTINGS_SETTINGS` property | OK | `TestXSettings` (live round-trip) |
 | codec (`encode`/`decode`) | the binary settings format, both byte orders | OK | `TestCodecRoundTrip` (offline) |
 
 ## RENDER (tk/render)
