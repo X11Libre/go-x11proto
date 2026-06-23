@@ -25,6 +25,9 @@ test-simple: simple
 	$(GO) build -o simple ./demo/simple
 	./simple
 
+test-editor:
+	$(GO) run ./demo/editor
+
 tetris:
 	$(GO) run ./demo/tetris64
 
