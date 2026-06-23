@@ -20,6 +20,7 @@ type MyWindow struct {
 	font     base.FONT
 	bgPixmap base.PIXMAP
 	Menu     tk_widget.MenuBar
+	Ctx      *tk_widget.Menu // right-click context menu
 	Win2     ChildWindow
 	Button   tk_widget.Button
 }
@@ -61,6 +62,32 @@ func (w *MyWindow) Init() {
 		{Label: "About", OnClick: func() { log.Printf("menu: Help / About\n") }},
 	})
 	errPanic(w.Menu.Init(), "create menu bar")
+
+	// right-click context menu with separators and nested submenus
+	w.Ctx = &tk_widget.Menu{
+		Items: []tk_widget.MenuItem{
+			{Label: "New", OnClick: func() { log.Printf("ctx: New\n") }},
+			{Label: "Open", OnClick: func() { log.Printf("ctx: Open\n") }},
+			{Separator: true},
+			{Label: "Recent", Submenu: []tk_widget.MenuItem{
+				{Label: "alpha.txt", OnClick: func() { log.Printf("ctx: Recent / alpha\n") }},
+				{Label: "beta.txt", OnClick: func() { log.Printf("ctx: Recent / beta\n") }},
+				{Separator: true},
+				{Label: "Clear", OnClick: func() { log.Printf("ctx: Recent / Clear\n") }},
+			}},
+			{Label: "Options", Submenu: []tk_widget.MenuItem{
+				{Label: "Theme", Submenu: []tk_widget.MenuItem{ // a third layer
+					{Label: "Light", OnClick: func() { log.Printf("ctx: Theme / Light\n") }},
+					{Label: "Dark", OnClick: func() { log.Printf("ctx: Theme / Dark\n") }},
+				}},
+				{Label: "Verbose", OnClick: func() { log.Printf("ctx: Verbose\n") }},
+			}},
+			{Separator: true},
+			{Label: "Quit", OnClick: func() { os.Exit(0) }},
+		},
+	}
+	w.Ctx.Drawable.Conn = w.Window.Conn
+	errPanic(w.Ctx.Init(), "create context menu")
 
 	w.Win2 = ChildWindow{
 		Window: tk_core.Window{
@@ -116,7 +143,7 @@ func (w *MyWindow) HandleWindowEvent(ev events.Event) bool {
 		w.Gc_black = gcid
 	}
 
-	switch ev.(type) {
+	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		w.FillRects(
 			w.Gc_black.XID,
@@ -129,8 +156,12 @@ func (w *MyWindow) HandleWindowEvent(ev events.Event) bool {
 			w.Gc_black.XID,
 			30,
 			30,
-			"hello foo bar",
+			"hello foo bar (right-click for a context menu)",
 		)
+	case *events.ButtonPressEvent:
+		if e.Key == 3 { // right button: pop up the context menu at the pointer
+			w.Ctx.Popup(base.INT16(e.RootX), base.INT16(e.RootY))
+		}
 	case *events.KeyPressEvent:
 	case *events.KeyReleaseEvent:
 	default:
