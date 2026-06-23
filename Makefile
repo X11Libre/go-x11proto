@@ -22,5 +22,6 @@ simple:
 	$(GO) build -o simple ./demo/simple
 
 test-simple: simple
+	$(GO) build -o simple ./demo/simple
 	./simple
 
