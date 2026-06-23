@@ -84,6 +84,12 @@ func ParseEvent(data []byte, be bool) (Event, error) {
 		return ParseEvent_CreateNotify(gev, rbuf)
 	case event_code.ClientMessage:
 		return ParseEvent_ClientMessage(gev, rbuf)
+	case event_code.SelectionClear:
+		return ParseEvent_SelectionClear(gev, rbuf)
+	case event_code.SelectionRequest:
+		return ParseEvent_SelectionRequest(gev, rbuf)
+	case event_code.SelectionNotify:
+		return ParseEvent_SelectionNotify(gev, rbuf)
 	default:
 		return unhandledEvent{gev}, nil
 	}
