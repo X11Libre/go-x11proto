@@ -28,6 +28,13 @@ func typeRunes(tv *TextView, s string) {
 
 func key(tv *TextView, k keyboard.Key) { tv.edit(keyboard.Event{Key: k}) }
 
+// seek positions the cursor and collapses the selection there (what a real
+// click/navigation does), so tests start from a clean, unselected cursor.
+func seek(tv *TextView, line, col int) {
+	tv.curLine, tv.curCol = line, col
+	tv.collapseSelection()
+}
+
 func TestTextViewInsertAndText(t *testing.T) {
 	tv := newTV(5)
 	typeRunes(tv, "hello")
@@ -41,7 +48,7 @@ func TestTextViewInsertAndText(t *testing.T) {
 
 func TestTextViewNewlineSplitsLine(t *testing.T) {
 	tv := newTV(5, "abcdef")
-	tv.curCol = 3
+	seek(tv, 0, 3)
 	key(tv, keyboard.KeyEnter)
 	if got := tv.Text(); got != "abc\ndef" {
 		t.Fatalf("Text = %q, want %q", got, "abc\ndef")
@@ -53,7 +60,7 @@ func TestTextViewNewlineSplitsLine(t *testing.T) {
 
 func TestTextViewBackspaceJoinsLines(t *testing.T) {
 	tv := newTV(5, "abc", "def")
-	tv.curLine, tv.curCol = 1, 0
+	seek(tv, 1, 0)
 	key(tv, keyboard.KeyBackspace)
 	if got := tv.Text(); got != "abcdef" {
 		t.Fatalf("Text = %q, want %q", got, "abcdef")
@@ -65,7 +72,7 @@ func TestTextViewBackspaceJoinsLines(t *testing.T) {
 
 func TestTextViewBackspaceWithinLine(t *testing.T) {
 	tv := newTV(5, "hello")
-	tv.curCol = 5
+	seek(tv, 0, 5)
 	key(tv, keyboard.KeyBackspace)
 	key(tv, keyboard.KeyBackspace)
 	if got := tv.Text(); got != "hel" {
@@ -75,7 +82,7 @@ func TestTextViewBackspaceWithinLine(t *testing.T) {
 
 func TestTextViewDeleteForwardJoins(t *testing.T) {
 	tv := newTV(5, "abc", "def")
-	tv.curLine, tv.curCol = 0, 3
+	seek(tv, 0, 3)
 	key(tv, keyboard.KeyDelete)
 	if got := tv.Text(); got != "abcdef" {
 		t.Fatalf("Text = %q, want %q", got, "abcdef")
@@ -84,8 +91,8 @@ func TestTextViewDeleteForwardJoins(t *testing.T) {
 
 func TestTextViewCursorMovementClampsColumn(t *testing.T) {
 	tv := newTV(5, "longline", "hi", "another")
-	tv.curLine, tv.curCol = 0, 8 // end of "longline"
-	key(tv, keyboard.KeyDown)    // onto "hi" (len 2) -> col clamps to 2
+	seek(tv, 0, 8)            // end of "longline"
+	key(tv, keyboard.KeyDown) // onto "hi" (len 2) -> col clamps to 2
 	if tv.curLine != 1 || tv.curCol != 2 {
 		t.Errorf("after Down: (%d,%d), want (1,2)", tv.curLine, tv.curCol)
 	}
@@ -101,7 +108,7 @@ func TestTextViewCursorMovementClampsColumn(t *testing.T) {
 
 func TestTextViewLeftWrapsToPrevLine(t *testing.T) {
 	tv := newTV(5, "ab", "cd")
-	tv.curLine, tv.curCol = 1, 0
+	seek(tv, 1, 0)
 	key(tv, keyboard.KeyLeft)
 	if tv.curLine != 0 || tv.curCol != 2 {
 		t.Errorf("Left wrap: (%d,%d), want (0,2)", tv.curLine, tv.curCol)
@@ -166,5 +173,109 @@ func TestTextViewOnChangeFires(t *testing.T) {
 	typeRunes(tv, "ab")
 	if n != 2 {
 		t.Errorf("OnChange fired %d times, want 2", n)
+	}
+}
+
+// selectRange sets a mouse-style selection from (al,ac) to (cl,cc).
+func selectRange(tv *TextView, al, ac, cl, cc int) {
+	tv.anchorLine, tv.anchorCol = al, ac
+	tv.curLine, tv.curCol = cl, cc
+}
+
+func TestTextViewSelectedTextSingleLine(t *testing.T) {
+	tv := newTV(5, "hello world")
+	selectRange(tv, 0, 0, 0, 5)
+	if got := tv.SelectedText(); got != "hello" {
+		t.Errorf("SelectedText = %q, want %q", got, "hello")
+	}
+}
+
+func TestTextViewSelectedTextReversed(t *testing.T) {
+	// anchor after cursor: range must normalise.
+	tv := newTV(5, "hello world")
+	selectRange(tv, 0, 11, 0, 6)
+	if got := tv.SelectedText(); got != "world" {
+		t.Errorf("SelectedText = %q, want %q", got, "world")
+	}
+}
+
+func TestTextViewSelectedTextMultiLine(t *testing.T) {
+	tv := newTV(5, "abc", "def", "ghi")
+	selectRange(tv, 0, 1, 2, 2) // from "bc" .. through .. "gh"
+	if got := tv.SelectedText(); got != "bc\ndef\ngh" {
+		t.Errorf("SelectedText = %q, want %q", got, "bc\ndef\ngh")
+	}
+}
+
+func TestTextViewDeleteSelectionMultiLine(t *testing.T) {
+	tv := newTV(5, "abc", "def", "ghi")
+	selectRange(tv, 0, 1, 2, 2)
+	tv.DeleteSelection()
+	if got := tv.Text(); got != "ai" {
+		t.Errorf("after delete: %q, want %q", got, "ai")
+	}
+	if tv.curLine != 0 || tv.curCol != 1 {
+		t.Errorf("cursor = (%d,%d), want (0,1)", tv.curLine, tv.curCol)
+	}
+	if tv.hasSelection() {
+		t.Error("selection should be collapsed after delete")
+	}
+}
+
+func TestTextViewTypeOverSelection(t *testing.T) {
+	tv := newTV(5, "hello world")
+	selectRange(tv, 0, 0, 0, 5) // select "hello"
+	tv.edit(keyboard.Event{Rune: 'X'})
+	if got := tv.Text(); got != "X world" {
+		t.Errorf("type-over: %q, want %q", got, "X world")
+	}
+}
+
+func TestTextViewBackspaceDeletesSelection(t *testing.T) {
+	tv := newTV(5, "hello world")
+	selectRange(tv, 0, 0, 0, 6) // "hello "
+	tv.edit(keyboard.Event{Key: keyboard.KeyBackspace})
+	if got := tv.Text(); got != "world" {
+		t.Errorf("backspace selection: %q, want %q", got, "world")
+	}
+}
+
+func TestTextViewInsertPaste(t *testing.T) {
+	tv := newTV(5, "ad")
+	seek(tv, 0, 1)
+	tv.Insert("bc")
+	if got := tv.Text(); got != "abcd" {
+		t.Errorf("paste: %q, want %q", got, "abcd")
+	}
+	// multi-line paste
+	tv2 := newTV(5, "")
+	tv2.Insert("one\ntwo")
+	if got := tv2.Text(); got != "one\ntwo" {
+		t.Errorf("multiline paste: %q, want %q", got, "one\ntwo")
+	}
+}
+
+func TestTextViewSelSpan(t *testing.T) {
+	tv := newTV(5, "abcdef", "ghijkl")
+	selectRange(tv, 0, 2, 1, 3)
+	if s0, s1, ok := tv.selSpan(0); !ok || s0 != 2 || s1 != 6 {
+		t.Errorf("line0 span = (%d,%d,%v), want (2,6,true)", s0, s1, ok)
+	}
+	if s0, s1, ok := tv.selSpan(1); !ok || s0 != 0 || s1 != 3 {
+		t.Errorf("line1 span = (%d,%d,%v), want (0,3,true)", s0, s1, ok)
+	}
+	// no selection -> no span
+	tv.collapseSelection()
+	if _, _, ok := tv.selSpan(0); ok {
+		t.Error("collapsed selection should have no span")
+	}
+}
+
+func TestTextViewNavigationCollapsesSelection(t *testing.T) {
+	tv := newTV(5, "hello")
+	selectRange(tv, 0, 0, 0, 5)
+	tv.edit(keyboard.Event{Key: keyboard.KeyLeft})
+	if tv.hasSelection() {
+		t.Error("arrow key should collapse the selection")
 	}
 }

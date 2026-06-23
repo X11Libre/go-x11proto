@@ -30,12 +30,28 @@ type TextView struct {
 
 	OnChange func()
 	OnScroll func()
+	// OnSelect fires when a mouse selection finishes with non-empty text, so the
+	// app can own the PRIMARY selection. OnKey, if set, sees each decoded key
+	// before default handling; returning true marks it handled (e.g. to bind
+	// Ctrl+C/V/X to the clipboard).
+	OnSelect func(string)
+	OnKey    func(keyboard.Event) bool
 
-	gc      *tk_core.GC
-	lines   []string
+	SelectionBg base.CARD32 // highlight colour (default light blue)
+
+	gc    *tk_core.GC
+	selGc *tk_core.GC
+	lines []string
+
 	curLine int // cursor line index
 	curCol  int // cursor column as a rune index within the line
-	top     int // first visible line
+
+	// selection anchor; the active end is the cursor. Empty when equal to it.
+	anchorLine int
+	anchorCol  int
+	selecting  bool
+
+	top int // first visible line
 }
 
 // Init creates and maps the text view, builds its GC, and loads the keyboard
@@ -48,8 +64,11 @@ func (t *TextView) Init() error {
 	if len(t.lines) == 0 {
 		t.lines = []string{""}
 	}
+	if t.SelectionBg == 0 {
+		t.SelectionBg = 0xb0c4ff // light blue
+	}
 	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.ButtonPress |
-		event_mask.ButtonRelease | event_mask.Exposure)
+		event_mask.ButtonRelease | event_mask.Button1Motion | event_mask.Exposure)
 
 	t.Window.SetWindowHandler(t)
 	if err := t.Window.Create(); err != nil {
@@ -61,6 +80,11 @@ func (t *TextView) Init() error {
 		return err
 	}
 	t.gc = gc
+	selGc, err := t.Conn.CreateGC1(t.SelectionBg, t.Bg, t.Font.ID)
+	if err != nil {
+		return err
+	}
+	t.selGc = selGc
 
 	if t.Keymap == nil {
 		if km, err := keyboard.Load(t.Conn.X11Conn); err == nil {
@@ -118,13 +142,45 @@ func (t *TextView) Draw() error {
 		if ln >= len(t.lines) {
 			break
 		}
+		y := base.INT16(i * h)
+		if s0, s1, ok := t.selSpan(ln); ok {
+			rs := []rune(t.lines[ln])
+			x0 := 2 + t.Font.TextWidth(string(rs[:s0]))
+			x1 := 2 + t.Font.TextWidth(string(rs[:s1]))
+			if err := t.FillRect(t.selGc.XID, base.INT16(x0), y, base.CARD16(x1-x0), base.CARD16(h)); err != nil {
+				return err
+			}
+		}
 		if t.lines[ln] != "" {
-			if err := t.Font.DrawText(t.Drawable, t.gc.XID, 2, base.INT16(i*h), 0, t.lines[ln]); err != nil {
+			if err := t.Font.DrawText(t.Drawable, t.gc.XID, 2, y, 0, t.lines[ln]); err != nil {
 				return err
 			}
 		}
 	}
 	return t.drawCaret()
+}
+
+// selSpan returns the selected rune range [s0,s1) on visible line ln, if any.
+func (t *TextView) selSpan(ln int) (s0, s1 int, ok bool) {
+	if !t.hasSelection() {
+		return 0, 0, false
+	}
+	l0, c0, l1, c1 := t.selRange()
+	if ln < l0 || ln > l1 {
+		return 0, 0, false
+	}
+	n := t.runeLen(ln)
+	s0, s1 = 0, n
+	if ln == l0 {
+		s0 = c0
+	}
+	if ln == l1 {
+		s1 = c1
+	}
+	if s1 < s0 {
+		s1 = s0
+	}
+	return s0, s1, s1 > s0
 }
 
 // drawCaret paints a vertical bar at the cursor, if it is on a visible line.
@@ -148,11 +204,34 @@ func (t *TextView) HandleWindowEvent(ev events.Event) bool {
 	case *events.ExposeEvent:
 		_ = t.Draw()
 	case *events.ButtonPressEvent:
-		t.focus()
-		t.placeCursor(int(e.EventX), int(e.EventY))
-		_ = t.Draw()
+		if e.Key == 1 { // left button: place cursor and begin selecting
+			t.focus()
+			t.placeCursor(int(e.EventX), int(e.EventY))
+			t.collapseSelection()
+			t.selecting = true
+			_ = t.Draw()
+		}
+	case *events.MotionEvent:
+		if t.selecting {
+			t.placeCursor(int(e.EventX), int(e.EventY))
+			_ = t.Draw()
+		}
+	case *events.ButtonReleaseEvent:
+		if t.selecting {
+			t.selecting = false
+			if t.hasSelection() && t.OnSelect != nil {
+				t.OnSelect(t.SelectedText())
+			}
+		}
 	case *events.KeyPressEvent:
-		if t.Keymap != nil && t.edit(t.Keymap.Lookup(e.Key, e.State)) {
+		if t.Keymap == nil {
+			return true
+		}
+		k := t.Keymap.Lookup(e.Key, e.State)
+		if t.OnKey != nil && t.OnKey(k) {
+			return true
+		}
+		if t.edit(k) {
 			_ = t.Draw()
 		}
 	}
@@ -181,6 +260,7 @@ func (t *TextView) placeCursor(x, y int) {
 // repaint is needed. It does no drawing itself, so it is testable without a
 // server.
 func (t *TextView) edit(k keyboard.Event) bool {
+	hadSel := t.hasSelection()
 	switch k.Key {
 	case keyboard.KeyLeft:
 		t.moveLeft()
@@ -199,13 +279,23 @@ func (t *TextView) edit(k keyboard.Event) bool {
 	case keyboard.KeyPageDown:
 		t.moveVert(t.VisibleLines())
 	case keyboard.KeyEnter:
+		t.replaceSelection()
 		t.insertNewline()
 	case keyboard.KeyBackspace:
-		t.backspace()
+		if hadSel {
+			t.DeleteSelection()
+		} else {
+			t.backspace()
+		}
 	case keyboard.KeyDelete:
-		t.deleteForward()
+		if hadSel {
+			t.DeleteSelection()
+		} else {
+			t.deleteForward()
+		}
 	case keyboard.KeyNone:
 		if k.Printable() {
+			t.replaceSelection()
 			t.insertRune(k.Rune)
 		} else {
 			return false // modifier-only or unhandled key: no repaint
@@ -213,8 +303,91 @@ func (t *TextView) edit(k keyboard.Event) bool {
 	default:
 		return false
 	}
+	t.collapseSelection() // keyboard navigation/editing collapses the selection
 	t.ensureVisible()
 	return true
+}
+
+// replaceSelection deletes the selection (if any) before an insert.
+func (t *TextView) replaceSelection() {
+	if t.hasSelection() {
+		t.DeleteSelection()
+	}
+}
+
+// --- selection ---
+
+func (t *TextView) hasSelection() bool {
+	return t.anchorLine != t.curLine || t.anchorCol != t.curCol
+}
+
+// selRange returns the selection ordered as (l0,c0) <= (l1,c1).
+func (t *TextView) selRange() (l0, c0, l1, c1 int) {
+	al, ac, cl, cc := t.anchorLine, t.anchorCol, t.curLine, t.curCol
+	if al < cl || (al == cl && ac <= cc) {
+		return al, ac, cl, cc
+	}
+	return cl, cc, al, ac
+}
+
+func (t *TextView) collapseSelection() {
+	t.anchorLine, t.anchorCol = t.curLine, t.curCol
+}
+
+// SelectedText returns the currently selected text (empty if no selection).
+func (t *TextView) SelectedText() string {
+	if !t.hasSelection() {
+		return ""
+	}
+	l0, c0, l1, c1 := t.selRange()
+	if l0 == l1 {
+		return string([]rune(t.lines[l0])[c0:c1])
+	}
+	var b strings.Builder
+	b.WriteString(string([]rune(t.lines[l0])[c0:]))
+	for ln := l0 + 1; ln < l1; ln++ {
+		b.WriteByte('\n')
+		b.WriteString(t.lines[ln])
+	}
+	b.WriteByte('\n')
+	b.WriteString(string([]rune(t.lines[l1])[:c1]))
+	return b.String()
+}
+
+// DeleteSelection removes the selected range and places the cursor at its start.
+func (t *TextView) DeleteSelection() {
+	if t.ReadOnly || !t.hasSelection() {
+		return
+	}
+	l0, c0, l1, c1 := t.selRange()
+	head := string([]rune(t.lines[l0])[:c0])
+	tail := string([]rune(t.lines[l1])[c1:])
+	t.lines[l0] = head + tail
+	if l1 > l0 {
+		t.lines = append(t.lines[:l0+1], t.lines[l1+1:]...)
+	}
+	t.curLine, t.curCol = l0, c0
+	t.collapseSelection()
+	t.changed()
+}
+
+// Insert replaces any selection with s (which may contain newlines).
+func (t *TextView) Insert(s string) {
+	if t.ReadOnly {
+		return
+	}
+	if t.hasSelection() {
+		t.DeleteSelection()
+	}
+	for _, r := range s {
+		if r == '\n' {
+			t.insertNewline()
+		} else {
+			t.insertRune(r)
+		}
+	}
+	t.collapseSelection()
+	t.ensureVisible()
 }
 
 // --- editing primitives (operate on rune slices so multibyte is safe) ---
