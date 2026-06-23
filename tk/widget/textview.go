@@ -68,7 +68,8 @@ func (t *TextView) Init() error {
 		t.SelectionBg = 0xb0c4ff // light blue
 	}
 	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.ButtonPress |
-		event_mask.ButtonRelease | event_mask.Button1Motion | event_mask.Exposure)
+		event_mask.ButtonRelease | event_mask.Button1Motion | event_mask.Exposure |
+		event_mask.StructureNotify)
 
 	t.Window.SetWindowHandler(t)
 	if err := t.Window.Create(); err != nil {
@@ -202,6 +203,10 @@ func (t *TextView) drawCaret() error {
 func (t *TextView) HandleWindowEvent(ev events.Event) bool {
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
+		_ = t.Draw()
+	case *events.ConfigureEvent:
+		t.W, t.H = e.Width, e.Height
+		t.ensureVisible()
 		_ = t.Draw()
 	case *events.ButtonPressEvent:
 		if e.Key == 1 { // left button: place cursor and begin selecting

@@ -33,7 +33,7 @@ func (s *Scrollbar) Init() error {
 		s.ThumbColor = s.Conn.X11Conn.DefaultBlackPixel()
 	}
 	s.EventMask |= base.CARD32(event_mask.ButtonPress | event_mask.ButtonRelease |
-		event_mask.Button1Motion | event_mask.Exposure)
+		event_mask.Button1Motion | event_mask.Exposure | event_mask.StructureNotify)
 	if !s.SetBackPixel {
 		s.BackPixel = 0xc0c0c0 // light grey track
 		s.SetBackPixel = true
@@ -70,6 +70,9 @@ func (s *Scrollbar) Draw() error {
 func (s *Scrollbar) HandleWindowEvent(ev events.Event) bool {
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
+		_ = s.Draw()
+	case *events.ConfigureEvent:
+		s.W, s.H = e.Width, e.Height
 		_ = s.Draw()
 	case *events.ButtonPressEvent:
 		s.press(int(e.EventY))
