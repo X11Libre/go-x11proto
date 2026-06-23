@@ -77,6 +77,17 @@ Legend:
 | `Menu` | override-redirect popup with separators and cascading submenus; press-drag-release selection driven by one pointer grab on the top menu | OK | `TestTkMenu`, `TestTkContextMenu` (separators + 3-layer submenus) |
 | `MenuBar` | horizontal title strip; a press pops up the title's `Menu` below it | OK | `TestTkMenu` |
 
+## XSETTINGS (tk/xsettings)
+
+Property-based, server-mediated desktop settings (font DPI, font/theme name,
+colours) - the channel GTK/Qt use.
+
+| API | Role | Status | Test |
+|-----|------|--------|------|
+| `Client` (`Get` / `ManagerWindow` / accessors `DPI`/`FontName`/`ThemeName`/…) | read the published settings | RT | `TestXSettings` (values verified) |
+| `Manager` (`NewManager` / `Set` / `Close`) | own `_XSETTINGS_S<n>` + publish via the `_XSETTINGS_SETTINGS` property | OK | `TestXSettings` (live round-trip) |
+| codec (`encode`/`decode`) | the binary settings format, both byte orders | OK | `TestCodecRoundTrip` (offline) |
+
 ## RENDER (tk/render)
 
 tk-layer wrapper over `proto/ext/render` (the RENDER extension).
