@@ -33,8 +33,9 @@ const (
 // Menu is a popup menu with separators and cascading submenus. Pop it up with
 // Popup (e.g. as a context menu on a right-click, or from a MenuBar); the
 // top-level menu grabs the pointer and drives the whole cascade via root
-// coordinates (classic press-drag-release: drag highlights and opens submenus,
-// release on a leaf runs its OnClick, a press/release elsewhere dismisses it).
+// coordinates. It is click-to-open: the menu stays up after the opening click,
+// hovering a submenu item opens it to the right, clicking a leaf runs its
+// OnClick, and a click outside dismisses the cascade.
 //
 // The embedded Window's Conn must be set before Init; Parent defaults to root.
 type Menu struct {
@@ -52,6 +53,12 @@ type Menu struct {
 	childItem int   // item index that opened child, -1 = none
 	subs      map[int]*Menu
 	rx, ry    base.INT16 // window position in root coordinates
+
+	// press tracking (top-of-cascade only): a release selects only when it
+	// matches a press on the same item, so the click that opened the menu (whose
+	// press landed outside, before the grab) does not select anything.
+	pressMenu *Menu
+	pressIdx  int
 }
 
 // Init creates the (initially unmapped) override-redirect menu window.
@@ -131,6 +138,8 @@ func (m *Menu) Popup(rootX, rootY base.INT16) error {
 	m.parent = nil
 	m.rx, m.ry = rootX, rootY
 	m.hi = -1
+	m.pressMenu = nil
+	m.pressIdx = -1
 	if err := m.Move(rootX, rootY); err != nil {
 		return err
 	}
@@ -287,22 +296,35 @@ func (top *Menu) handleMotion(rx, ry base.INT16) {
 	}
 }
 
-func (top *Menu) handleRelease(rx, ry base.INT16) {
-	var action func()
-	if cur := top.deepestContaining(rx, ry); cur != nil {
-		if i := cur.itemAtRoot(rx, ry); cur.selectable(i) && cur.Items[i].Submenu == nil {
-			action = cur.Items[i].OnClick
-		}
+func (top *Menu) handlePress(rx, ry base.INT16) {
+	cur := top.deepestContaining(rx, ry)
+	if cur == nil {
+		top.closeAll() // press outside the cascade dismisses it
+		return
 	}
+	top.pressMenu = cur
+	top.pressIdx = cur.itemAtRoot(rx, ry)
+}
+
+func (top *Menu) handleRelease(rx, ry base.INT16) {
+	cur := top.deepestContaining(rx, ry)
+	pressMenu, pressIdx := top.pressMenu, top.pressIdx
+	top.pressMenu, top.pressIdx = nil, -1
+
+	// select only on a full click on the same leaf item; ignore the release of
+	// the click that opened the menu (its press was outside the grab) so the
+	// menu stays open until an item is actually clicked.
+	if cur == nil || cur != pressMenu {
+		return
+	}
+	i := cur.itemAtRoot(rx, ry)
+	if i != pressIdx || !cur.selectable(i) || cur.Items[i].Submenu != nil {
+		return
+	}
+	action := cur.Items[i].OnClick
 	top.closeAll()
 	if action != nil {
 		action()
-	}
-}
-
-func (top *Menu) handlePress(rx, ry base.INT16) {
-	if top.deepestContaining(rx, ry) == nil {
-		top.closeAll()
 	}
 }
 
