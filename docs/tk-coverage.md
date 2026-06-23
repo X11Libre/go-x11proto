@@ -88,6 +88,18 @@ colours) - the channel GTK/Qt use.
 | `Manager` (`NewManager` / `Set` / `Close`) | own `_XSETTINGS_S<n>` (real timestamp) + publish via the `_XSETTINGS_SETTINGS` property | OK | `TestXSettings` (live round-trip) |
 | codec (`encode`/`decode`) | the binary settings format, both byte orders | OK | `TestCodecRoundTrip` (offline) |
 
+## Theme (tk/theme)
+
+Turns the XSETTINGS hints into concrete sizes so a toolkit can scale with the
+desktop.
+
+| API | Role | Status | Test |
+|-----|------|--------|------|
+| `Load` | read `Xft/DPI` + `Gtk/FontName` (defaults 96 / "Sans 10") | RT | `TestTheme` (publishes 192dpi/12pt, verified) |
+| `PointsToPixels` / `FontPixelSize` | point→pixel at the theme DPI | OK | `TestPointsToPixels`, `TestTheme` |
+| `OpenFont` | core font at the themed pixel size, "fixed" fallback | OK | `TestTheme` |
+| `parseFontName` | split "Family … Npt" | OK | `TestParseFontName` (offline) |
+
 ## RENDER (tk/render)
 
 tk-layer wrapper over `proto/ext/render` (the RENDER extension).
