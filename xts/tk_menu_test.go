@@ -45,3 +45,35 @@ func TestTkMenu(t *testing.T) {
 
 	must(t, parent.Destroy(), "parent.Destroy")
 }
+
+// TestTkContextMenu smoke-tests a standalone context menu with separators and
+// nested (multi-layer) submenus: build it, pop it up, close it.
+func TestTkContextMenu(t *testing.T) {
+	c := connect(t)
+	defer c.Close()
+	tk := tk_core.MakeTkConn(c)
+
+	ctx := &tk_widget.Menu{
+		Items: []tk_widget.MenuItem{
+			{Label: "New", OnClick: func() {}},
+			{Separator: true},
+			{Label: "Recent", Submenu: []tk_widget.MenuItem{
+				{Label: "a.txt"},
+				{Separator: true},
+				{Label: "Clear", OnClick: func() {}},
+			}},
+			{Label: "Options", Submenu: []tk_widget.MenuItem{
+				{Label: "Theme", Submenu: []tk_widget.MenuItem{ // third layer
+					{Label: "Light"},
+					{Label: "Dark"},
+				}},
+			}},
+			{Separator: true},
+			{Label: "Quit", OnClick: func() {}},
+		},
+	}
+	ctx.Drawable.Conn = &tk
+	must(t, ctx.Init(), "context Menu.Init")
+	must(t, ctx.Popup(80, 80), "context Menu.Popup")
+	ctx.Close()
+}

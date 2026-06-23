@@ -9,41 +9,55 @@ import (
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 )
 
-// MenuItem is one entry of a Menu. An item with a nil OnClick (or empty Label)
-// is selectable but does nothing.
+// MenuItem is one entry of a Menu:
+//   - a normal item has a Label and an OnClick;
+//   - an item with a non-nil Submenu cascades to a child menu (OnClick ignored);
+//   - an item with Separator set is a non-selectable divider (Label ignored).
 type MenuItem struct {
-	Label   string
-	OnClick func()
+	Label     string
+	OnClick   func()
+	Submenu   []MenuItem
+	Separator bool
 }
 
-// menu layout metrics (in pixels, sized for the "fixed" font).
+// menu layout metrics (pixels, sized for the "fixed" font).
 const (
 	menuItemHeight = 20
+	menuSepHeight  = 7
 	menuPadX       = 8
-	menuTextBase   = 14 // text baseline offset within an item
-	menuCharW      = 7  // approximate glyph advance, for sizing
+	menuTextBase   = 14
+	menuCharW      = 7
+	menuArrowW     = 14 // reserved column for the submenu arrow
 )
 
-// Menu is a popup menu: an override-redirect window listing items vertically.
-// Popup maps it at a root position and grabs the pointer (classic press-drag-
-// release behaviour): moving over an item highlights it, releasing on it runs
-// its OnClick, and releasing/pressing elsewhere just closes the menu.
+// Menu is a popup menu with separators and cascading submenus. Pop it up with
+// Popup (e.g. as a context menu on a right-click, or from a MenuBar); the
+// top-level menu grabs the pointer and drives the whole cascade via root
+// coordinates (classic press-drag-release: drag highlights and opens submenus,
+// release on a leaf runs its OnClick, a press/release elsewhere dismisses it).
 //
 // The embedded Window's Conn must be set before Init; Parent defaults to root.
 type Menu struct {
 	tk_core.Window
 	Items []MenuItem
 
-	gc   *tk_core.GC // black-on-white text (and the highlight fill)
+	gc   *tk_core.GC // black-on-white text + separator/highlight fill
 	gcHi *tk_core.GC // white-on-black text for the highlighted item
 	font base.FONT
-	hi   int // highlighted item index, -1 = none
-	open bool
+
+	itemY     []int // itemY[i] = top of item i; itemY[len] = total height
+	hi        int   // highlighted selectable item, -1 = none
+	parent    *Menu // menu that opened this one (nil = top of cascade)
+	child     *Menu // currently open submenu of this menu
+	childItem int   // item index that opened child, -1 = none
+	subs      map[int]*Menu
+	rx, ry    base.INT16 // window position in root coordinates
 }
 
 // Init creates the (initially unmapped) override-redirect menu window.
 func (m *Menu) Init() error {
 	m.hi = -1
+	m.childItem = -1
 	if m.font.Invalid() {
 		f, err := m.Conn.GetFont("fixed")
 		if err != nil {
@@ -51,9 +65,8 @@ func (m *Menu) Init() error {
 		}
 		m.font = f
 	}
+	m.layout()
 
-	m.W = base.CARD16(menuWidth(m.Items))
-	m.H = base.CARD16(menuItemHeight * len(m.Items))
 	m.EventMask = event_mask.Exposure | event_mask.ButtonPress |
 		event_mask.ButtonRelease | event_mask.PointerMotion
 	m.SetBackPixel = true
@@ -82,19 +95,42 @@ func (m *Menu) Init() error {
 	return nil
 }
 
-func menuWidth(items []MenuItem) int {
-	max := 1
-	for _, it := range items {
-		if n := len(it.Label); n > max {
-			max = n
+func (m *Menu) layout() {
+	m.itemY = make([]int, len(m.Items)+1)
+	y, hasSub := 0, false
+	for i, it := range m.Items {
+		m.itemY[i] = y
+		if it.Separator {
+			y += menuSepHeight
+		} else {
+			y += menuItemHeight
+		}
+		if it.Submenu != nil {
+			hasSub = true
 		}
 	}
-	return max*menuCharW + 2*menuPadX
+	m.itemY[len(m.Items)] = y
+
+	w := 1
+	for _, it := range m.Items {
+		if !it.Separator && len(it.Label) > w {
+			w = len(it.Label)
+		}
+	}
+	pix := w*menuCharW + 2*menuPadX
+	if hasSub {
+		pix += menuArrowW
+	}
+	m.W = base.CARD16(pix)
+	m.H = base.CARD16(y)
 }
 
 // Popup maps the menu with its top-left at root coordinates (rootX, rootY) and
-// grabs the pointer so the menu receives all subsequent pointer events.
+// grabs the pointer; the menu is now the top of the cascade.
 func (m *Menu) Popup(rootX, rootY base.INT16) error {
+	m.parent = nil
+	m.rx, m.ry = rootX, rootY
+	m.hi = -1
 	if err := m.Move(rootX, rootY); err != nil {
 		return err
 	}
@@ -104,8 +140,6 @@ func (m *Menu) Popup(rootX, rootY base.INT16) error {
 	if err := m.Map(); err != nil {
 		return err
 	}
-	m.open = true
-	m.hi = -1
 	_, err := rpc.GrabPointer(m.Conn.X11Conn, &request.GrabPointerRequest{
 		GrabWindow:   m.XID,
 		OwnerEvents:  false,
@@ -116,61 +150,174 @@ func (m *Menu) Popup(rootX, rootY base.INT16) error {
 	return err
 }
 
-// Close ungrabs the pointer and unmaps the menu.
-func (m *Menu) Close() {
-	if !m.open {
-		return
+// Close dismisses the whole cascade (call on the top menu).
+func (m *Menu) Close() { m.topMenu().closeAll() }
+
+func (m *Menu) topMenu() *Menu {
+	for m.parent != nil {
+		m = m.parent
 	}
-	m.open = false
-	_ = rpc.UngrabPointer(m.Conn.X11Conn, 0)
-	_ = m.Unmap()
+	return m
 }
 
-// itemAt returns the item index at window coordinates (x,y), or -1 if outside.
-func (m *Menu) itemAt(x, y base.CARD16) int {
-	if int(x) >= int(m.W) || int(y) >= int(m.H) {
+func (top *Menu) closeAll() {
+	top.closeChild()
+	_ = rpc.UngrabPointer(top.Conn.X11Conn, 0)
+	_ = top.Unmap()
+	top.hi = -1
+}
+
+func (m *Menu) closeChild() {
+	if m.child != nil {
+		m.child.closeChild()
+		_ = m.child.Unmap()
+		m.child = nil
+		m.childItem = -1
+	}
+}
+
+// subOf returns (creating on first use) the Menu for item i's submenu.
+func (m *Menu) subOf(i int) *Menu {
+	if m.subs == nil {
+		m.subs = map[int]*Menu{}
+	}
+	if s, ok := m.subs[i]; ok {
+		return s
+	}
+	s := &Menu{Items: m.Items[i].Submenu}
+	s.Drawable.Conn = m.Conn
+	if err := s.Init(); err != nil {
+		return nil
+	}
+	m.subs[i] = s
+	return s
+}
+
+func (m *Menu) openChild(i int) {
+	sub := m.subOf(i)
+	if sub == nil {
+		return
+	}
+	sub.parent = m
+	sub.hi = -1
+	sub.rx = m.rx + base.INT16(int(m.W)-2)
+	sub.ry = m.ry + base.INT16(m.itemY[i])
+	_ = sub.Move(sub.rx, sub.ry)
+	_ = sub.Raise()
+	_ = sub.Map()
+	m.child = sub
+	m.childItem = i
+}
+
+func (m *Menu) containsRoot(rx, ry base.INT16) bool {
+	return int(rx) >= int(m.rx) && int(rx) < int(m.rx)+int(m.W) &&
+		int(ry) >= int(m.ry) && int(ry) < int(m.ry)+int(m.H)
+}
+
+// deepestContaining returns the deepest open menu whose rectangle holds the
+// point, or nil if the point is over none of them.
+func (top *Menu) deepestContaining(rx, ry base.INT16) *Menu {
+	var found *Menu
+	for m := top; m != nil; m = m.child {
+		if m.containsRoot(rx, ry) {
+			found = m
+		}
+	}
+	return found
+}
+
+func (m *Menu) itemAtRoot(rx, ry base.INT16) int {
+	if !m.containsRoot(rx, ry) {
 		return -1
 	}
-	i := int(y) / menuItemHeight
-	if i < 0 || i >= len(m.Items) {
-		return -1
+	yy := int(ry) - int(m.ry)
+	for i := range m.Items {
+		if yy >= m.itemY[i] && yy < m.itemY[i+1] {
+			return i
+		}
 	}
-	return i
+	return -1
+}
+
+func (m *Menu) selectable(i int) bool {
+	return i >= 0 && i < len(m.Items) && !m.Items[i].Separator
 }
 
 func (m *Menu) draw() {
+	m.ClearArea(0, 0, 0, 0, false)
 	for i, it := range m.Items {
-		y0 := base.INT16(i * menuItemHeight)
+		y0 := base.INT16(m.itemY[i])
+		if it.Separator {
+			m.FillRect(m.gc.XID, 4, y0+base.INT16(menuSepHeight/2), m.W-8, 1)
+			continue
+		}
+		text := m.gc
 		if i == m.hi {
-			m.FillRect(m.gc.XID, 0, y0, m.W, menuItemHeight) // black bar
-			m.PutText8(m.gcHi.XID, menuPadX, y0+menuTextBase, it.Label)
-		} else {
-			m.PutText8(m.gc.XID, menuPadX, y0+menuTextBase, it.Label)
+			m.FillRect(m.gc.XID, 0, y0, m.W, menuItemHeight)
+			text = m.gcHi
+		}
+		m.PutText8(text.XID, menuPadX, y0+menuTextBase, it.Label)
+		if it.Submenu != nil {
+			m.PutText8(text.XID, base.INT16(int(m.W)-menuArrowW), y0+menuTextBase, ">")
 		}
 	}
 }
 
-// HandleWindowEvent is the tk WindowHandler for the menu.
+func (top *Menu) handleMotion(rx, ry base.INT16) {
+	cur := top.deepestContaining(rx, ry)
+	if cur == nil {
+		return // between menus: keep the cascade as-is
+	}
+	i := cur.itemAtRoot(rx, ry)
+	newHi := -1
+	if cur.selectable(i) {
+		newHi = i
+	}
+	if cur.hi != newHi {
+		cur.hi = newHi
+		cur.draw()
+	}
+	if newHi >= 0 && cur.Items[newHi].Submenu != nil {
+		if cur.childItem != newHi {
+			cur.closeChild()
+			cur.openChild(newHi)
+		}
+	} else {
+		cur.closeChild()
+	}
+}
+
+func (top *Menu) handleRelease(rx, ry base.INT16) {
+	var action func()
+	if cur := top.deepestContaining(rx, ry); cur != nil {
+		if i := cur.itemAtRoot(rx, ry); cur.selectable(i) && cur.Items[i].Submenu == nil {
+			action = cur.Items[i].OnClick
+		}
+	}
+	top.closeAll()
+	if action != nil {
+		action()
+	}
+}
+
+func (top *Menu) handlePress(rx, ry base.INT16) {
+	if top.deepestContaining(rx, ry) == nil {
+		top.closeAll()
+	}
+}
+
+// HandleWindowEvent is the tk WindowHandler. Each menu window draws itself on
+// Expose; pointer events (delivered to the top via the grab) drive the cascade.
 func (m *Menu) HandleWindowEvent(ev events.Event) bool {
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		m.draw()
 	case *events.MotionEvent:
-		if idx := m.itemAt(e.EventX, e.EventY); idx != m.hi {
-			m.hi = idx
-			m.ClearArea(0, 0, 0, 0, false)
-			m.draw()
-		}
+		m.topMenu().handleMotion(base.INT16(e.RootX), base.INT16(e.RootY))
 	case *events.ButtonReleaseEvent:
-		idx := m.itemAt(e.EventX, e.EventY)
-		m.Close()
-		if idx >= 0 && m.Items[idx].OnClick != nil {
-			m.Items[idx].OnClick()
-		}
+		m.topMenu().handleRelease(base.INT16(e.RootX), base.INT16(e.RootY))
 	case *events.ButtonPressEvent:
-		if m.itemAt(e.EventX, e.EventY) < 0 {
-			m.Close() // a press outside the menu dismisses it
-		}
+		m.topMenu().handlePress(base.INT16(e.RootX), base.INT16(e.RootY))
 	}
 	return true
 }
