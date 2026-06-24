@@ -42,6 +42,11 @@ type X11Conn struct {
 	AtomCache      map[string]base.ATOM
 	windowHandlers map[base.WINDOW]X11WindowEventHandler
 
+	// request-length limit in 4-byte units; raised past 0xffff once the
+	// BIG-REQUESTS extension is enabled (bigReqEnabled).
+	maxReqUnits   int
+	bigReqEnabled bool
+
 	// extension registry: cached QueryExtension results and the registered
 	// event/error code ranges (see extension.go).
 	extMu      sync.Mutex
@@ -89,6 +94,12 @@ func NewConn(display_name string, be bool) (*X11Conn, error) {
 		conn.Close()
 		return nil, c.errorF("X11 handshake failed: %w", err)
 	}
+
+	c.maxReqUnits = int(c.Setup.MaxRequestSize)
+	if c.maxReqUnits <= 0 {
+		c.maxReqUnits = 0xffff
+	}
+	c.enableBigRequests() // raises maxReqUnits when the extension is present
 
 	return c, nil
 }
@@ -513,18 +524,43 @@ func (c *X11Conn) encodeRequest(req base.Request) ([]byte, error) {
 		return nil, err
 	}
 	b := writer.ToBytes()
-	// The request length is a CARD16 count of 4-byte units; a request longer
-	// than the server's maximum (at most 0xffff without BIG-REQUESTS) would wrap
-	// that field and desync the connection. Refuse it cleanly instead.
+	// The normal 16-bit length field counts 4-byte units; a request over 0xffff
+	// units needs the BIG-REQUESTS encoding (and the extension enabled). Anything
+	// beyond the effective maximum is refused cleanly (a wrapped length field
+	// would desync the connection).
 	units := len(b) / 4
-	max := int(c.Setup.MaxRequestSize)
-	if max == 0 || max > 0xffff {
-		max = 0xffff
+	final := units
+	big := false
+	if units > 0xffff {
+		if !c.bigReqEnabled {
+			return nil, c.errorF("request %T is %d units; exceeds 65535 and BIG-REQUESTS is unavailable", req, units)
+		}
+		big = true
+		final = units + 1 // the inserted 32-bit length word adds one unit
 	}
-	if units > max {
-		return nil, c.errorF("request %T is %d units, exceeds the server maximum of %d (BIG-REQUESTS not supported)", req, units, max)
+	if final > c.maxReqUnits {
+		return nil, c.errorF("request %T is %d units, exceeds the server maximum of %d", req, final, c.maxReqUnits)
+	}
+	if big {
+		b = encodeBigRequest(b, c.BE)
 	}
 	return b, nil
+}
+
+// encodeBigRequest rewrites a normally-encoded request into BIG-REQUESTS form:
+// the 16-bit length is zeroed (the marker) and a 32-bit length in 4-byte units
+// (including the inserted word) is spliced in right after it.
+func encodeBigRequest(b []byte, be bool) []byte {
+	units := uint32(len(b)/4) + 1
+	out := make([]byte, len(b)+4)
+	out[0], out[1] = b[0], b[1] // opcode + data byte; out[2:4] stay 0 (the marker)
+	if be {
+		binary.BigEndian.PutUint32(out[4:8], units)
+	} else {
+		binary.LittleEndian.PutUint32(out[4:8], units)
+	}
+	copy(out[8:], b[4:])
+	return out
 }
 
 func (c *X11Conn) DefaultRoot() base.WINDOW {
