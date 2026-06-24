@@ -122,6 +122,37 @@ func (w Window) ClearArea(x, y base.INT16, width, height base.CARD16, exposures 
 	return rpc.ClearArea(w.Conn.X11Conn, w.XID, x, y, width, height, exposures)
 }
 
+// xaATOM is the predefined ATOM property type (XA_ATOM).
+const xaATOM base.ATOM = 4
+
+// EnableWMDelete advertises the WM_DELETE_WINDOW protocol on this (top-level)
+// window, so the window manager sends a ClientMessage when the user closes it
+// instead of killing the client connection (which would tear down the whole
+// program). It returns the WM_DELETE_WINDOW atom; pass received events to
+// IsWMDelete to recognise the close request and shut the window down gracefully.
+func (w Window) EnableWMDelete() (base.ATOM, error) {
+	proto, err := w.Conn.InternAtom("WM_PROTOCOLS")
+	if err != nil {
+		return 0, err
+	}
+	del, err := w.Conn.InternAtom("WM_DELETE_WINDOW")
+	if err != nil {
+		return 0, err
+	}
+	if err := rpc.ChangeProperty32(w.Conn.X11Conn, 0 /*replace*/, w.XID, proto, xaATOM,
+		[]base.CARD32{base.CARD32(del)}); err != nil {
+		return 0, err
+	}
+	return del, nil
+}
+
+// IsWMDelete reports whether ev is the WM_DELETE_WINDOW close request for the
+// given atom (as returned by EnableWMDelete). It is false for del == 0.
+func IsWMDelete(ev events.Event, del base.ATOM) bool {
+	cm, ok := ev.(*events.ClientMessageEvent)
+	return ok && del != 0 && base.ATOM(cm.Data[0]) == del
+}
+
 // ParentRelative is the special background-pixmap value that makes a window use
 // its parent's background: the parent's background shows through wherever the
 // window itself does not paint, giving a "transparent" overlay.

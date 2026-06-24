@@ -31,6 +31,11 @@ type Frame struct {
 	Left, Right *Slot
 	Center      *tk_core.Window
 	OnLayout    func()
+	// OnClose, if set, is called when the window manager asks to close the frame
+	// (the title-bar close button). Without it the WM would kill the connection.
+	OnClose func()
+
+	wmDelete base.ATOM
 }
 
 // Init creates and maps the frame and performs the first layout.
@@ -40,6 +45,7 @@ func (f *Frame) Init() error {
 	if err := f.Window.Create(); err != nil {
 		return err
 	}
+	f.wmDelete, _ = f.Window.EnableWMDelete()
 	if err := f.Window.Map(); err != nil {
 		return err
 	}
@@ -47,8 +53,15 @@ func (f *Frame) Init() error {
 	return nil
 }
 
-// HandleWindowEvent re-lays the children when the frame is resized.
+// HandleWindowEvent re-lays the children on resize and handles the WM close
+// request.
 func (f *Frame) HandleWindowEvent(ev events.Event) bool {
+	if tk_core.IsWMDelete(ev, f.wmDelete) {
+		if f.OnClose != nil {
+			f.OnClose()
+		}
+		return true
+	}
 	if e, ok := ev.(*events.ConfigureEvent); ok {
 		f.W, f.H = e.Width, e.Height
 		f.Relayout(int(e.Width), int(e.Height))

@@ -33,8 +33,9 @@ type Confirm struct {
 	Floating bool
 	Title    string
 
-	gc      *tk_core.GC
-	yes, no *tk_widget.Button
+	gc       *tk_core.GC
+	yes, no  *tk_widget.Button
+	wmDelete base.ATOM
 }
 
 const (
@@ -82,6 +83,9 @@ func (c *Confirm) Init() error {
 		if km, err := keyboard.Load(c.Conn.X11Conn); err == nil {
 			c.Keymap = km
 		}
+	}
+	if c.Floating {
+		c.wmDelete, _ = c.Window.EnableWMDelete()
 	}
 	if err := c.Window.Map(); err != nil {
 		return err
@@ -150,6 +154,12 @@ func (c *Confirm) Draw() error {
 
 // HandleWindowEvent keeps keyboard shortcuts working alongside the buttons.
 func (c *Confirm) HandleWindowEvent(ev events.Event) bool {
+	if tk_core.IsWMDelete(ev, c.wmDelete) { // window manager close = "No"
+		if c.OnNo != nil {
+			c.OnNo()
+		}
+		return true
+	}
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		_ = c.Draw()

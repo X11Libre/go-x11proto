@@ -56,6 +56,7 @@ type FilePicker struct {
 
 	lastClickRow int
 	lastClickT   base.CARD32
+	wmDelete     base.ATOM
 }
 
 // Init creates and maps the picker and builds its GCs and keyboard map.
@@ -97,6 +98,9 @@ func (p *FilePicker) Init() error {
 		if km, err := keyboard.Load(p.Conn.X11Conn); err == nil {
 			p.Keymap = km
 		}
+	}
+	if p.Floating {
+		p.wmDelete, _ = p.Window.EnableWMDelete()
 	}
 	return p.Window.Map()
 }
@@ -169,6 +173,12 @@ func (p *FilePicker) Draw() error {
 
 // HandleWindowEvent drives drawing, navigation and selection.
 func (p *FilePicker) HandleWindowEvent(ev events.Event) bool {
+	if tk_core.IsWMDelete(ev, p.wmDelete) { // window manager close = cancel
+		if p.OnCancel != nil {
+			p.OnCancel()
+		}
+		return true
+	}
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		_ = p.Draw()
