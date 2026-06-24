@@ -462,6 +462,11 @@ will fire its `OnClick` for a matching `keyboard.Event` and return true. Forward
 your focused widget's keys to it — e.g. `textview.OnKey = bar.HandleKey` — and
 every hotkey is just the menu's own accelerator, with no duplicated key table.
 
+**Tear-off.** Set `menu.TearOff = true` to draw a dashed handle at the top of
+the menu; clicking it detaches a persistent, window-manager-managed copy that
+stays open (like the old GTK tear-off menus). Leaf items in the torn-off menu
+still run their `OnClick`; submenu cascades are not offered while detached.
+
 ### `TextView`
 
 A multi-line, editable text area: a line buffer drawn with a font, a caret,
