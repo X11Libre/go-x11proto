@@ -24,12 +24,16 @@ type Button struct {
 	gc      *tk_core.GC // black on white (normal text, pressed fill)
 	gcHi    *tk_core.GC // white on black (pressed text)
 	ownFont bool
-	down    bool
+	pressed bool // button 1 is held after pressing inside
+	down    bool // currently drawn pressed (pressed AND pointer inside)
 }
 
 // Init creates and maps the button, opening a default font if none was set.
 func (w *Button) Init() error {
-	w.EventMask |= event_mask.ButtonPress | event_mask.ButtonRelease | event_mask.Exposure
+	// Button1Motion lets us track the pointer leaving/re-entering while held, so
+	// a press can be cancelled by releasing outside the button.
+	w.EventMask |= event_mask.ButtonPress | event_mask.ButtonRelease |
+		event_mask.Button1Motion | event_mask.Exposure
 	w.SetBorderPixel = true
 	w.BorderPixel = w.Conn.X11Conn.DefaultBlackPixel()
 	if w.BorderWidth == 0 {
@@ -92,18 +96,42 @@ func (w *Button) Repaint() {
 	_ = w.Font.DrawText(w.Drawable, text.XID, base.INT16(x), base.INT16(y), 0, label)
 }
 
+// inside reports whether a pointer position (relative to the button window) is
+// within its bounds. EventX/EventY are unsigned, so a position left/above the
+// window wraps to a large value and is correctly treated as outside.
+func (w *Button) inside(x, y base.CARD16) bool {
+	return x < w.W && y < w.H
+}
+
+func (w *Button) setDown(d bool) {
+	if d != w.down {
+		w.down = d
+		w.Repaint()
+	}
+}
+
 func (w *Button) HandleWindowEvent(ev events.Event) bool {
-	switch ev.(type) {
+	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		w.Repaint()
 	case *events.ButtonPressEvent:
-		w.down = true
-		w.Repaint()
+		if e.Key == 1 {
+			w.pressed = true
+			w.setDown(true)
+		}
+	case *events.MotionEvent:
+		// while held, follow the pointer: pop up if dragged out, press if back in
+		if w.pressed {
+			w.setDown(w.inside(e.EventX, e.EventY))
+		}
 	case *events.ButtonReleaseEvent:
-		w.down = false
-		w.Repaint()
-		if w.OnButtonPress != nil {
-			w.OnButtonPress()
+		if e.Key == 1 && w.pressed {
+			w.pressed = false
+			fire := w.inside(e.EventX, e.EventY)
+			w.setDown(false)
+			if fire && w.OnButtonPress != nil {
+				w.OnButtonPress() // only when released inside the button
+			}
 		}
 	}
 	return true
