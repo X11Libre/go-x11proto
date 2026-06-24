@@ -503,7 +503,9 @@ sb.SetRange(tv.LineCount(), tv.VisibleLines(), tv.TopLine())
 ```
 
 Pair it with the text view by forwarding `tv.OnScroll → sb.SetRange` and
-`sb.OnScroll → tv.ScrollTo`.
+`sb.OnScroll → tv.ScrollTo`. Both the `Scrollbar` and the `TextView` also scroll
+on wheel / touchpad two-finger gestures (X11 buttons 4/5), so the view responds
+to scrolling whether the pointer is over the text or the bar.
 
 ### `Frame`
 
@@ -644,9 +646,14 @@ fp.Open("/home/user")   // also takes focus
 
 Keys: Up/Down/PageUp/PageDown/Home/End move; Enter opens a directory or chooses
 a file; Backspace goes to the parent; Escape cancels. Mouse: a click selects, a
-double-click (or a click on the already-selected row) activates. The picker does
-not destroy itself — close it from the callbacks (`Destroy`). `demo/editor` uses
-it for File ▸ Open.
+double-click (or a click on the already-selected row) activates, and the wheel /
+touchpad scrolls the list. The picker does not destroy itself — close it from
+the callbacks (`Destroy`). `demo/editor` uses it for File ▸ Open.
+
+By default the picker is a child of `Parent`. Set `Floating: true` (with an
+optional `Title`) to make it a separate, window-manager-managed top-level window
+instead — its own title bar, movable — in which case `X`/`Y` are screen
+coordinates.
 
 ---
 
