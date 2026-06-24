@@ -178,6 +178,8 @@ func (e *Editor) wireCallbacks() {
 	// All hotkeys are menu accelerators; let the menu bar dispatch them.
 	e.tv.OnKey = e.menu.HandleKey
 	e.sb.OnScroll = func(top int) { e.tv.ScrollTo(top) }
+	// closing the main window (WM title-bar) goes through the quit guard
+	e.frame.OnClose = e.quit
 }
 
 func (e *Editor) setupClipboard() error {
