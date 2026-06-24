@@ -44,11 +44,13 @@ type Editor struct {
 	clip    *clipboard.Clipboard
 	clipWin base.WINDOW
 
-	prompt *promptBox         // active modal filename prompt, nil when none
-	picker *dialog.FilePicker // active open dialog, nil when none
+	prompt  *promptBox         // active modal filename prompt, nil when none
+	picker  *dialog.FilePicker // active open dialog, nil when none
+	confirm *dialog.Confirm    // active confirm dialog, nil when none
 
-	filename string
-	modified bool
+	filename  string
+	modified  bool
+	lastQuery string // last Find / Replace search term
 }
 
 // Init builds the window, widgets and wiring, then loads filename (if any).
@@ -109,16 +111,25 @@ func (e *Editor) buildMenu() error {
 		Drawable: tk_core.Drawable{Conn: e.tk}, Parent: &e.frame.Window, X: 0, Y: 0, W: winW,
 	}}
 	e.menu.AddMenu("File", []tk_widget.MenuItem{
+		{Label: "New", Accel: "Ctrl+N", OnClick: e.newFile},
 		{Label: "Open", Accel: "Ctrl+O", OnClick: e.open},
 		{Label: "Save", Accel: "Ctrl+S", OnClick: e.save},
 		{Label: "Save As", Accel: "Ctrl+Shift+S", OnClick: e.saveAs},
 		{Separator: true},
-		{Label: "Quit", Accel: "Ctrl+Q", OnClick: func() { os.Exit(0) }},
+		{Label: "Quit", Accel: "Ctrl+Q", OnClick: e.quit},
 	})
 	e.menu.AddMenu("Edit", []tk_widget.MenuItem{
-		{Label: "Copy", Accel: "Ctrl+C", OnClick: e.copy},
+		{Label: "Undo", Accel: "Ctrl+Z", OnClick: func() { e.tv.Undo() }},
+		{Label: "Redo", Accel: "Ctrl+Y", OnClick: func() { e.tv.Redo() }},
+		{Separator: true},
 		{Label: "Cut", Accel: "Ctrl+X", OnClick: e.cut},
+		{Label: "Copy", Accel: "Ctrl+C", OnClick: e.copy},
 		{Label: "Paste", Accel: "Ctrl+V", OnClick: e.paste},
+		{Separator: true},
+		{Label: "Select All", Accel: "Ctrl+A", OnClick: func() { e.tv.SelectAll() }},
+		{Label: "Find", Accel: "Ctrl+F", OnClick: e.find},
+		{Label: "Find Next", Accel: "Ctrl+G", OnClick: e.findNext},
+		{Label: "Replace All", Accel: "Ctrl+R", OnClick: e.replaceAll},
 	})
 	return e.menu.Init()
 }
@@ -222,8 +233,64 @@ func (e *Editor) paste() {
 
 // --- file actions ---
 
-// open shows the file picker and loads the chosen file.
-func (e *Editor) open() {
+// open guards unsaved changes, then shows the file picker.
+func (e *Editor) open() { e.guard(e.openPicker) }
+
+// quit guards unsaved changes, then exits.
+func (e *Editor) quit() { e.guard(func() { os.Exit(0) }) }
+
+// newFile guards unsaved changes, then clears the buffer.
+func (e *Editor) newFile() {
+	e.guard(func() {
+		e.tv.SetText("")
+		e.filename = ""
+		e.modified = false
+		e.refresh()
+		e.tv.Focus()
+	})
+}
+
+// guard runs action immediately if the buffer is unmodified, otherwise asks the
+// user to confirm discarding changes first.
+func (e *Editor) guard(action func()) {
+	if !e.modified {
+		action()
+		return
+	}
+	if e.confirm != nil {
+		return
+	}
+	const cw, ch = 340, 90
+	c := &dialog.Confirm{
+		Window: tk_core.Window{
+			Drawable: tk_core.Drawable{Conn: e.tk},
+			X:        winX + (winW-cw)/2, Y: winY + (winH-ch)/2, W: cw, H: ch,
+		},
+		Font:     e.font,
+		Message:  "Discard unsaved changes?",
+		Floating: true,
+		Title:    "Unsaved changes",
+	}
+	c.OnYes = func() { e.closeConfirm(); action() }
+	c.OnNo = func() { e.closeConfirm() }
+	if err := c.Init(); err != nil {
+		return
+	}
+	_ = c.Raise()
+	e.confirm = c
+}
+
+func (e *Editor) closeConfirm() {
+	if e.confirm == nil {
+		return
+	}
+	_ = e.confirm.Destroy()
+	e.confirm = nil
+	e.tv.Focus()
+}
+
+// openPicker shows the file picker and loads the chosen file.
+func (e *Editor) openPicker() {
 	if e.picker != nil {
 		return
 	}
@@ -309,6 +376,46 @@ func (e *Editor) writeFile(path string) {
 	e.flash(fmt.Sprintf("saved %s", path))
 }
 
+// --- find / replace ---
+
+func (e *Editor) find() {
+	e.askFilename("Find:", e.lastQuery, func(q string) {
+		e.tv.Focus()
+		if q == "" {
+			return
+		}
+		e.lastQuery = q
+		if !e.tv.FindNext(q) {
+			e.flash("not found: " + q)
+		}
+	})
+}
+
+func (e *Editor) findNext() {
+	if e.lastQuery == "" {
+		e.find()
+		return
+	}
+	if !e.tv.FindNext(e.lastQuery) {
+		e.flash("not found: " + e.lastQuery)
+	}
+}
+
+func (e *Editor) replaceAll() {
+	e.askFilename("Replace - find:", e.lastQuery, func(q string) {
+		if q == "" {
+			e.tv.Focus()
+			return
+		}
+		e.lastQuery = q
+		e.askFilename("Replace with:", "", func(r string) {
+			n := e.tv.ReplaceAll(q, r)
+			e.tv.Focus()
+			e.flash(fmt.Sprintf("replaced %d occurrence(s)", n))
+		})
+	})
+}
+
 // --- status / scrollbar refresh ---
 
 func (e *Editor) refresh() {
@@ -330,6 +437,13 @@ func (e *Editor) updateStatus() {
 		flag = " *"
 	}
 	_ = e.status.SetText(fmt.Sprintf("%s%s  -  %d lines", name, flag, e.tv.LineCount()))
+
+	// reflect the file + modified state in the window title
+	title := "go-xedit"
+	if e.filename != "" {
+		title += " - " + filepath.Base(e.filename)
+	}
+	_ = e.frame.SetName(title + flag)
 }
 
 // flash shows a transient message in the status line (until the next refresh).
