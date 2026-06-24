@@ -93,6 +93,7 @@ func (w *TetrisWin) createWin(screenW, screenH int) {
 	}
 	w.frameWin.SetWindowHandler(w)
 	errPanic(w.frameWin.Create(), "create frame")
+	_ = w.frameWin.SetIcon(tetrisIcon())
 
 	// bg window: child of frame, framebuffer-sized (8:5), centered so the
 	// frame's black background shows through as the left/right border.

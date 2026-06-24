@@ -70,6 +70,7 @@ func (e *Editor) Init(filename string) error {
 	if err := e.frame.Init(); err != nil {
 		return err
 	}
+	_ = e.frame.SetIcon(editorIcon())
 
 	if err := e.buildMenu(); err != nil {
 		return err
