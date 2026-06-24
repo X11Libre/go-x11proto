@@ -38,6 +38,7 @@ type TextView struct {
 	OnKey    func(keyboard.Event) bool
 
 	SelectionBg base.CARD32 // highlight colour (default light blue)
+	TabWidth    int         // tab stop in columns (default 8)
 
 	gc    *tk_core.GC
 	selGc *tk_core.GC
@@ -111,6 +112,75 @@ func (t *TextView) SetText(s string) {
 // Text returns the buffer contents joined with newlines.
 func (t *TextView) Text() string { return strings.Join(t.lines, "\n") }
 
+// --- tab handling -------------------------------------------------------
+//
+// Tabs are kept verbatim in the buffer but expanded to the next tab stop for
+// display and metrics, so tab-indented text (i.e. most code) lines up instead
+// of collapsing to the left.
+
+func (t *TextView) tabCols() int {
+	if t.TabWidth > 0 {
+		return t.TabWidth
+	}
+	return 8
+}
+
+// expand returns the first n runes of line (n < 0 = all) with tabs replaced by
+// spaces up to each tab stop, as drawn on screen.
+func (t *TextView) expand(line string, n int) string {
+	tw := t.tabCols()
+	var b strings.Builder
+	col := 0
+	for i, r := range []rune(line) {
+		if n >= 0 && i >= n {
+			break
+		}
+		if r == '\t' {
+			for s := tw - col%tw; s > 0; s-- {
+				b.WriteByte(' ')
+				col++
+			}
+		} else {
+			b.WriteRune(r)
+			col++
+		}
+	}
+	return b.String()
+}
+
+// colX is the pixel x (from the text origin) of rune column col on line.
+func (t *TextView) colX(line string, col int) int {
+	return t.Font.TextWidth(t.expand(line, col))
+}
+
+// colAtX maps a pixel offset (from the text origin) to the nearest rune column,
+// accounting for tab expansion.
+func (t *TextView) colAtX(line string, px int) int {
+	if px <= 0 {
+		return 0
+	}
+	tw := t.tabCols()
+	sp := t.Font.RuneWidth(' ')
+	rs := []rune(line)
+	col, acc := 0, 0
+	for i, r := range rs {
+		var w int
+		if r == '\t' {
+			n := tw - col%tw
+			w = n * sp
+			col += n
+		} else {
+			w = t.Font.RuneWidth(r)
+			col++
+		}
+		if px < acc+w/2+1 {
+			return i
+		}
+		acc += w
+	}
+	return len(rs)
+}
+
 // LineCount / VisibleLines / TopLine expose scroll state for a scrollbar.
 func (t *TextView) LineCount() int    { return len(t.lines) }
 func (t *TextView) VisibleLines() int { return max1(int(t.H) / t.Font.Height()) }
@@ -146,15 +216,14 @@ func (t *TextView) Draw() error {
 		}
 		y := base.INT16(i * h)
 		if s0, s1, ok := t.selSpan(ln); ok {
-			rs := []rune(t.lines[ln])
-			x0 := 2 + t.Font.TextWidth(string(rs[:s0]))
-			x1 := 2 + t.Font.TextWidth(string(rs[:s1]))
+			x0 := 2 + t.colX(t.lines[ln], s0)
+			x1 := 2 + t.colX(t.lines[ln], s1)
 			if err := t.FillRect(t.selGc.XID, base.INT16(x0), y, base.CARD16(x1-x0), base.CARD16(h)); err != nil {
 				return err
 			}
 		}
 		if t.lines[ln] != "" {
-			if err := t.Font.DrawText(t.Drawable, t.gc.XID, 2, y, 0, t.lines[ln]); err != nil {
+			if err := t.Font.DrawText(t.Drawable, t.gc.XID, 2, y, 0, t.expand(t.lines[ln], -1)); err != nil {
 				return err
 			}
 		}
@@ -194,8 +263,7 @@ func (t *TextView) drawCaret() error {
 	if row < 0 || row >= t.VisibleLines() {
 		return nil
 	}
-	line := t.lines[t.curLine]
-	x := 2 + t.Font.TextWidth(string([]rune(line)[:t.curCol]))
+	x := 2 + t.colX(t.lines[t.curLine], t.curCol)
 	y := row * t.Font.Height()
 	return t.FillRect(t.gc.XID, base.INT16(x), base.INT16(y), 1, base.CARD16(t.Font.Height()))
 }
@@ -266,7 +334,7 @@ func (t *TextView) placeCursor(x, y int) {
 		row = len(t.lines) - 1
 	}
 	t.curLine = row
-	t.curCol = t.Font.IndexAtX(t.lines[row], x-2)
+	t.curCol = t.colAtX(t.lines[row], x-2)
 }
 
 // edit applies one decoded key event to the buffer/cursor and reports whether a

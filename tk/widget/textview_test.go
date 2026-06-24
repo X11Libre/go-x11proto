@@ -293,3 +293,38 @@ func TestTextViewSetTextClearsSelection(t *testing.T) {
 		t.Error("SetText/collapse must clear the selection")
 	}
 }
+
+func TestTextViewExpandTabs(t *testing.T) {
+	tv := newTV(5)
+	tv.TabWidth = 8
+	cases := []struct{ in, want string }{
+		{"\tx", "        x"},                 // tab at col 0 -> 8 spaces
+		{"ab\tc", "ab      c"},               // tab from col 2 -> 6 spaces (to col 8)
+		{"abcdefgh\tx", "abcdefgh        x"}, // tab at col 8 -> next stop col 16
+		{"no tabs", "no tabs"},
+	}
+	for _, c := range cases {
+		if got := tv.expand(c.in, -1); got != c.want {
+			t.Errorf("expand(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// prefix expansion stops at n runes (n counts buffer runes, not columns)
+	if got := tv.expand("\tabc", 1); got != "        " {
+		t.Errorf("expand prefix of just the tab = %q, want 8 spaces", got)
+	}
+}
+
+func TestTextViewExpandKeepsBufferIntact(t *testing.T) {
+	// the buffer keeps the tab; only display/metrics expand it.
+	tv := newTV(5, "\tindented")
+	if tv.Text() != "\tindented" {
+		t.Errorf("buffer = %q, want a literal tab preserved", tv.Text())
+	}
+}
+
+func TestTextViewTabWidthDefault(t *testing.T) {
+	tv := newTV(5) // TabWidth 0 -> default 8
+	if got := tv.expand("\t.", -1); got != "        ." {
+		t.Errorf("default tab width: %q", got)
+	}
+}
