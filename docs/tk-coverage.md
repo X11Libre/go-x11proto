@@ -132,6 +132,14 @@ desktop.
 | `OpenFont` | core font at the themed pixel size, "fixed" fallback | OK | `TestTheme` |
 | `parseFontName` | split "Family … Npt" | OK | `TestParseFontName` (offline) |
 
+## Dialogs (tk/dialog)
+
+Reusable dialog windows built on the toolkit.
+
+| API | Role | Status | Test |
+|-----|------|--------|------|
+| `FilePicker` (`Init` / `Open` / `Draw` / `CurrentDir`) | file-open chooser: listing, selection, scroll, keyboard + mouse navigation | OK | `TestTkFilePicker` (live draw), `TestArrange*`/`TestTarget`/`TestClampSel`/`TestScrollTop`/`TestReadDirLive` (offline logic) |
+
 ## RENDER (tk/render)
 
 tk-layer wrapper over `proto/ext/render` (the RENDER extension).

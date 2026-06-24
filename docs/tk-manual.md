@@ -27,8 +27,9 @@ code see `demo/simple`, `demo/editor` and `demo/tetris64`.
 12. [Theming: `tk/theme` and `tk/xsettings`](#12-theming-tktheme-and-tkxsettings)
 13. [Images: `tk/xpm`](#13-images-tkxpm)
 14. [Compositing: `tk/render`](#14-compositing-tkrender)
-15. [Putting it together](#15-putting-it-together)
-16. [Conventions and gotchas](#16-conventions-and-gotchas)
+15. [Dialogs: `tk/dialog`](#15-dialogs-tkdialog)
+16. [Putting it together](#16-putting-it-together)
+17. [Conventions and gotchas](#17-conventions-and-gotchas)
 
 ---
 
@@ -47,6 +48,7 @@ tk/theme          desktop font DPI / family from XSETTINGS
 tk/xsettings      the XSETTINGS protocol (client + manager)
 tk/xpm            XPM / PNG / image.Image → uploadable pixmaps
 tk/render         the RENDER extension (compositing, solid fills)
+tk/dialog         reusable dialog windows (file-open picker)
 ```
 
 A recurring detail: some helpers take the **raw** connection `*proto/core.X11Conn`
@@ -622,7 +624,33 @@ can't express.
 
 ---
 
-## 15. Putting it together
+## 15. Dialogs: `tk/dialog`
+
+Reusable dialog windows. `FilePicker` is a self-contained file-open chooser: a
+header with the current directory, a scrollable list (parent, sub-directories,
+then files, each sorted) with a highlighted selection, and a key-hint footer.
+
+```go
+fp := &dialog.FilePicker{
+	Window: tk_core.Window{Drawable: tk_core.Drawable{Conn: &tk}, Parent: &win,
+		X: 100, Y: 80, W: 460, H: 360},
+	Font: f,
+}
+fp.OnAccept = func(path string) { fp.Destroy(); load(path) }
+fp.OnCancel = func()            { fp.Destroy() }
+fp.Init()
+fp.Open("/home/user")   // also takes focus
+```
+
+Keys: Up/Down/PageUp/PageDown/Home/End move; Enter opens a directory or chooses
+a file; Backspace goes to the parent; Escape cancels. Mouse: a click selects, a
+double-click (or a click on the already-selected row) activates. The picker does
+not destroy itself — close it from the callbacks (`Destroy`). `demo/editor` uses
+it for File ▸ Open.
+
+---
+
+## 16. Putting it together
 
 `demo/editor` is the canonical worked example — it composes almost the whole
 toolkit into an xedit-style editor. The skeleton:
@@ -663,7 +691,7 @@ bitmap-font `TextRenderer`.
 
 ---
 
-## 16. Conventions and gotchas
+## 17. Conventions and gotchas
 
 - **Two connection types.** Drawing hangs off `*tk/core.TkConn`; `font.Open`,
   `keyboard.Load`, `theme.Load`, `clipboard.New` take the raw
