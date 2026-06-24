@@ -75,7 +75,14 @@ func (s *Scrollbar) HandleWindowEvent(ev events.Event) bool {
 		s.W, s.H = e.Width, e.Height
 		_ = s.Draw()
 	case *events.ButtonPressEvent:
-		s.press(int(e.EventY))
+		switch e.Key {
+		case btnWheelUp: // touchpad / wheel scroll up
+			s.scrollTo(s.top - wheelStepLines)
+		case btnWheelDown:
+			s.scrollTo(s.top + wheelStepLines)
+		default:
+			s.press(int(e.EventY))
+		}
 	case *events.ButtonReleaseEvent:
 		s.dragging = false
 	case *events.MotionEvent:

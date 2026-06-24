@@ -210,12 +210,17 @@ func (t *TextView) HandleWindowEvent(ev events.Event) bool {
 		t.ensureVisible()
 		_ = t.Draw()
 	case *events.ButtonPressEvent:
-		if e.Key == 1 { // left button: place cursor and begin selecting
+		switch e.Key {
+		case 1: // left button: place cursor and begin selecting
 			t.Focus()
 			t.placeCursor(int(e.EventX), int(e.EventY))
 			t.collapseSelection()
 			t.selecting = true
 			_ = t.Draw()
+		case btnWheelUp: // touchpad / wheel scroll up
+			t.ScrollTo(t.top - wheelStepLines)
+		case btnWheelDown:
+			t.ScrollTo(t.top + wheelStepLines)
 		}
 	case *events.MotionEvent:
 		if t.selecting {
