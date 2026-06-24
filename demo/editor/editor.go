@@ -12,7 +12,6 @@ import (
 	"github.com/X11Libre/go-x11proto/tk/clipboard"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	"github.com/X11Libre/go-x11proto/tk/font"
-	"github.com/X11Libre/go-x11proto/tk/keyboard"
 	"github.com/X11Libre/go-x11proto/tk/theme"
 	tk_widget "github.com/X11Libre/go-x11proto/tk/widget"
 )
@@ -40,6 +39,8 @@ type Editor struct {
 
 	clip    *clipboard.Clipboard
 	clipWin base.WINDOW
+
+	prompt *promptBox // active modal filename prompt, nil when none
 
 	filename string
 	modified bool
@@ -90,7 +91,7 @@ func (e *Editor) Init(filename string) error {
 	}
 
 	if filename != "" {
-		e.reload()
+		e.loadFile(filename)
 	} else {
 		e.tv.SetText("")
 	}
@@ -103,15 +104,16 @@ func (e *Editor) buildMenu() error {
 		Drawable: tk_core.Drawable{Conn: e.tk}, Parent: &e.frame.Window, X: 0, Y: 0, W: winW,
 	}}
 	e.menu.AddMenu("File", []tk_widget.MenuItem{
-		{Label: "Save", OnClick: e.save},
-		{Label: "Reload", OnClick: e.reload},
+		{Label: "Open", Accel: "Ctrl+O", OnClick: e.open},
+		{Label: "Save", Accel: "Ctrl+S", OnClick: e.save},
+		{Label: "Save As", Accel: "Ctrl+Shift+S", OnClick: e.saveAs},
 		{Separator: true},
-		{Label: "Quit", OnClick: func() { os.Exit(0) }},
+		{Label: "Quit", Accel: "Ctrl+Q", OnClick: func() { os.Exit(0) }},
 	})
 	e.menu.AddMenu("Edit", []tk_widget.MenuItem{
-		{Label: "Copy", OnClick: e.copy},
-		{Label: "Cut", OnClick: e.cut},
-		{Label: "Paste", OnClick: e.paste},
+		{Label: "Copy", Accel: "Ctrl+C", OnClick: e.copy},
+		{Label: "Cut", Accel: "Ctrl+X", OnClick: e.cut},
+		{Label: "Paste", Accel: "Ctrl+V", OnClick: e.paste},
 	})
 	return e.menu.Init()
 }
@@ -157,7 +159,8 @@ func (e *Editor) buildStatus() error {
 func (e *Editor) wireCallbacks() {
 	e.tv.OnChange = func() { e.modified = true; e.refresh() }
 	e.tv.OnScroll = func() { e.syncScrollbar() }
-	e.tv.OnKey = e.onKey
+	// All hotkeys are menu accelerators; let the menu bar dispatch them.
+	e.tv.OnKey = e.menu.HandleKey
 	e.sb.OnScroll = func(top int) { e.tv.ScrollTo(top) }
 }
 
@@ -183,26 +186,6 @@ func (e *Editor) setupClipboard() error {
 		e.refresh()
 	}
 	return nil
-}
-
-// onKey binds Ctrl+C/X/V/S; other keys fall through to normal editing.
-func (e *Editor) onKey(k keyboard.Event) bool {
-	if !k.Ctrl {
-		return false
-	}
-	switch k.Keysym {
-	case 'c':
-		e.copy()
-	case 'x':
-		e.cut()
-	case 'v':
-		e.paste()
-	case 's':
-		e.save()
-	default:
-		return false
-	}
-	return true
 }
 
 // --- clipboard actions ---
@@ -234,31 +217,54 @@ func (e *Editor) paste() {
 
 // --- file actions ---
 
-func (e *Editor) reload() {
-	if e.filename == "" {
+// open prompts for a path and loads it.
+func (e *Editor) open() {
+	e.askFilename("Open file:", e.filename, e.loadFile)
+}
+
+// loadFile reads path into the buffer.
+func (e *Editor) loadFile(path string) {
+	if path == "" {
 		return
 	}
-	data, err := os.ReadFile(e.filename)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("open %s: %v", e.filename, err)
-		e.tv.SetText("")
+		e.flash(fmt.Sprintf("open failed: %v", err))
 		return
 	}
 	e.tv.SetText(string(data))
+	e.filename = path
 	e.modified = false
 	e.refresh()
 }
 
+// save writes to the current file, or asks for a name if there is none yet.
 func (e *Editor) save() {
 	if e.filename == "" {
-		e.filename = "untitled.txt"
+		e.saveAs()
+		return
 	}
-	if err := os.WriteFile(e.filename, []byte(e.tv.Text()), 0o644); err != nil {
-		log.Printf("save %s: %v", e.filename, err)
+	e.writeFile(e.filename)
+}
+
+// saveAs prompts for a path and saves to it.
+func (e *Editor) saveAs() {
+	e.askFilename("Save as:", e.filename, func(path string) {
+		if path == "" {
+			return
+		}
+		e.filename = path
+		e.writeFile(path)
+	})
+}
+
+func (e *Editor) writeFile(path string) {
+	if err := os.WriteFile(path, []byte(e.tv.Text()), 0o644); err != nil {
+		e.flash(fmt.Sprintf("save failed: %v", err))
 		return
 	}
 	e.modified = false
-	e.refresh()
+	e.flash(fmt.Sprintf("saved %s", path))
 }
 
 // --- status / scrollbar refresh ---
@@ -283,6 +289,9 @@ func (e *Editor) updateStatus() {
 	}
 	_ = e.status.SetText(fmt.Sprintf("%s%s  -  %d lines", name, flag, e.tv.LineCount()))
 }
+
+// flash shows a transient message in the status line (until the next refresh).
+func (e *Editor) flash(msg string) { _ = e.status.SetText(msg) }
 
 // openMono opens a monospace font at px pixels, falling back to "fixed".
 func openMono(conn *core.X11Conn, px int) *font.Font {
