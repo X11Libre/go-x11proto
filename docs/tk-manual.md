@@ -463,9 +463,11 @@ your focused widget's keys to it — e.g. `textview.OnKey = bar.HandleKey` — a
 every hotkey is just the menu's own accelerator, with no duplicated key table.
 
 **Tear-off.** Set `menu.TearOff = true` to draw a dashed handle at the top of
-the menu; clicking it detaches a persistent, window-manager-managed copy that
-stays open (like the old GTK tear-off menus). Leaf items in the torn-off menu
-still run their `OnClick`; submenu cascades are not offered while detached.
+the menu; clicking it detaches a persistent copy that stays open (like the old
+GTK tear-off menus). The torn-off menu is an override-redirect window with its
+own frame: the dashed handle doubles as a title bar — **drag** it to move the
+window, **click** it (no drag) to re-attach (close). Leaf items still run their
+`OnClick`; submenu cascades are not offered while detached.
 
 ### `TextView`
 
