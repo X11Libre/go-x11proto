@@ -363,8 +363,14 @@ func (top *Menu) handlePress(rx, ry base.INT16) {
 		top.closeAll() // press outside the cascade dismisses it
 		return
 	}
+	idx := cur.itemAtRoot(rx, ry)
+	if idx == tearIndex { // pressing the tear-off handle detaches immediately
+		top.closeAll()
+		cur.tearOff()
+		return
+	}
 	top.pressMenu = cur
-	top.pressIdx = cur.itemAtRoot(rx, ry)
+	top.pressIdx = idx
 }
 
 func (top *Menu) handleRelease(rx, ry base.INT16) {
@@ -379,13 +385,6 @@ func (top *Menu) handleRelease(rx, ry base.INT16) {
 		return
 	}
 	i := cur.itemAtRoot(rx, ry)
-	if pressIdx == tearIndex { // clicked the tear-off handle: detach a copy
-		if i == tearIndex {
-			top.closeAll()
-			cur.tearOff()
-		}
-		return
-	}
 	if i != pressIdx || !cur.selectable(i) || cur.Items[i].Submenu != nil {
 		return
 	}
