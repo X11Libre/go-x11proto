@@ -77,7 +77,7 @@ Legend:
 | `Menu` | override-redirect popup with separators and cascading submenus; press-drag-release selection driven by one pointer grab on the top menu | OK | `TestTkMenu`, `TestTkContextMenu` (separators + 3-layer submenus) |
 | `MenuBar` | horizontal title strip; a press pops up the title's `Menu` below it | OK | `TestTkMenu` |
 | `Button` | labelled push button, up/down repaint, OnButtonPress | OK | exercised by the simple demo |
-| `TextView` | multi-line editable text: caret, insert/delete/nav, scroll, mouse selection + highlight; OnChange/OnScroll/OnSelect/OnKey hooks | OK | `TestTextView*` (offline editing/selection), `TestTkTextView` (live draw) |
+| `TextView` | multi-line editable text: caret, insert/delete/nav, Tab (expanded), Shift+nav & mouse selection, undo/redo, find/replace, vertical+horizontal & wheel scroll; OnChange/OnScroll/OnSelect/OnKey hooks | OK | `TestTextView*`, `TestSearchFrom`, `TestReplaceAll`, `TestFindNext` (offline), `TestTkTextView`, `TestTkWheelScroll` (live) |
 | `Scrollbar` | vertical track + thumb sized to the line range; click-to-page, drag-to-scroll; OnScroll | OK | `TestThumbGeom*` (offline), `TestTkScrollbar` (live, bound to a TextView) |
 | `Frame` | border layout (Top/Bottom/Left/Right/Center), re-lays children on resize | OK | `TestBorderLayout*` (offline), `TestTkFrame` (live geometry) |
 
@@ -138,7 +138,8 @@ Reusable dialog windows built on the toolkit.
 
 | API | Role | Status | Test |
 |-----|------|--------|------|
-| `FilePicker` (`Init` / `Open` / `Draw` / `CurrentDir`) | file-open chooser: listing, selection, scroll, keyboard + mouse navigation | OK | `TestTkFilePicker` (live draw), `TestArrange*`/`TestTarget`/`TestClampSel`/`TestScrollTop`/`TestReadDirLive` (offline logic) |
+| `FilePicker` (`Init` / `Open` / `Draw` / `CurrentDir`) | file-open chooser: listing, selection, scroll, keyboard + mouse navigation; `Floating` option | OK | `TestTkFilePicker`, `TestTkFilePickerFloating` (live), `TestArrange*`/`TestTarget`/`TestClampSel`/`TestScrollTop`/`TestReadDirLive` (offline) |
+| `Confirm` (`Init` / `Draw`) | yes/no dialog (Enter/y, Esc/n); `Floating` option | OK | `TestTkConfirm` (live, both callbacks) |
 
 ## RENDER (tk/render)
 

@@ -469,13 +469,23 @@ tv.SetText("hello\nworld")
 s := tv.Text()        // buffer as one string
 ```
 
-Content / cursor / scrolling:
+Built-in editing: insert / Backspace / Delete / Enter, **Tab** (inserts a
+literal tab, kept in the buffer but drawn expanded to `TabWidth` columns,
+default 8), arrows / Home / End / PageUp / PageDown, **Shift+navigation** to
+extend the selection, mouse selection, and **wheel / touchpad** scrolling. Long
+lines scroll horizontally to keep the caret in view.
+
+Content / cursor / scrolling / editing API:
 
 ```go
 tv.LineCount(); tv.VisibleLines(); tv.TopLine()
 tv.ScrollTo(line)
 tv.SelectedText(); tv.DeleteSelection(); tv.Insert("pasted text")
-tv.Focus()            // grab the keyboard
+tv.SelectAll()
+tv.Undo(); tv.Redo()                 // snapshot-based, compound edits = 1 step
+tv.FindNext("query")                 // selects the next (wrapping) match
+tv.ReplaceAll("old", "new")          // returns the count; undoable
+tv.Focus()                           // grab the keyboard
 ```
 
 Hooks let it drive the rest of a UI:
@@ -654,6 +664,21 @@ By default the picker is a child of `Parent`. Set `Floating: true` (with an
 optional `Title`) to make it a separate, window-manager-managed top-level window
 instead — its own title bar, movable — in which case `X`/`Y` are screen
 coordinates.
+
+`Confirm` is a small yes/no dialog (message + key hint): Enter or `y` fires
+`OnYes`, Escape or `n` fires `OnNo`. It also supports `Floating`/`Title`. Use it
+for "Discard unsaved changes?"-style guards.
+
+```go
+c := &dialog.Confirm{
+	Window:  tk_core.Window{Drawable: tk_core.Drawable{Conn: &tk}, X: 200, Y: 200, W: 340, H: 90},
+	Font:    f,
+	Message: "Discard unsaved changes?",
+}
+c.OnYes = func() { c.Destroy(); discard() }
+c.OnNo  = func() { c.Destroy() }
+c.Init()
+```
 
 ---
 
