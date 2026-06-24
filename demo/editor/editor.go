@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core"
@@ -11,6 +12,7 @@ import (
 	"github.com/X11Libre/go-x11proto/proto/rpc"
 	"github.com/X11Libre/go-x11proto/tk/clipboard"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
+	"github.com/X11Libre/go-x11proto/tk/dialog"
 	"github.com/X11Libre/go-x11proto/tk/font"
 	"github.com/X11Libre/go-x11proto/tk/theme"
 	tk_widget "github.com/X11Libre/go-x11proto/tk/widget"
@@ -40,7 +42,8 @@ type Editor struct {
 	clip    *clipboard.Clipboard
 	clipWin base.WINDOW
 
-	prompt *promptBox // active modal filename prompt, nil when none
+	prompt *promptBox         // active modal filename prompt, nil when none
+	picker *dialog.FilePicker // active open dialog, nil when none
 
 	filename string
 	modified bool
@@ -217,9 +220,42 @@ func (e *Editor) paste() {
 
 // --- file actions ---
 
-// open prompts for a path and loads it.
+// open shows the file picker and loads the chosen file.
 func (e *Editor) open() {
-	e.askFilename("Open file:", e.filename, e.loadFile)
+	if e.picker != nil {
+		return
+	}
+	const pw, ph = 460, 360
+	p := &dialog.FilePicker{
+		Window: tk_core.Window{
+			Drawable: tk_core.Drawable{Conn: e.tk}, Parent: &e.frame.Window,
+			X: (winW - pw) / 2, Y: (winH - ph) / 2, W: pw, H: ph,
+		},
+		Font: e.font,
+	}
+	p.OnAccept = func(path string) { e.closePicker(); e.loadFile(path) }
+	p.OnCancel = func() { e.closePicker() }
+	if err := p.Init(); err != nil {
+		return
+	}
+	start, _ := filepath.Abs(".")
+	if e.filename != "" {
+		if d, err := filepath.Abs(filepath.Dir(e.filename)); err == nil {
+			start = d
+		}
+	}
+	_ = p.Open(start)
+	_ = p.Raise()
+	e.picker = p
+}
+
+func (e *Editor) closePicker() {
+	if e.picker == nil {
+		return
+	}
+	_ = e.picker.Destroy()
+	e.picker = nil
+	e.tv.Focus()
 }
 
 // loadFile reads path into the buffer.
