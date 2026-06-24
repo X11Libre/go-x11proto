@@ -12,7 +12,15 @@ import (
 	"github.com/X11Libre/go-x11proto/tk/keyboard"
 )
 
-const dpDoubleClickMs = 400 // max gap for a double click
+const (
+	dpDoubleClickMs = 400 // max gap (ms) for a double click
+
+	// X11 maps wheel / touchpad two-finger scrolling to buttons 4 (up) and 5
+	// (down); wheelStep is the rows scrolled per notch.
+	btnWheelUp   base.CARD8 = 4
+	btnWheelDown base.CARD8 = 5
+	wheelStep               = 3
+)
 
 // FilePicker is a self-contained file-open chooser: a header showing the
 // current directory, a scrollable list of entries (parent, sub-directories,
@@ -34,6 +42,12 @@ type FilePicker struct {
 	OnAccept func(path string)
 	OnCancel func()
 
+	// Floating makes the picker a top-level, window-manager-managed window
+	// (its own title bar, movable) instead of a child of Parent. Title is its
+	// WM_NAME (default "Open File"). X/Y are then screen coordinates.
+	Floating bool
+	Title    string
+
 	gc, gcHi *tk_core.GC
 	dir      string
 	entries  []entry
@@ -54,6 +68,17 @@ func (p *FilePicker) Init() error {
 	p.SetBorderPixel = true
 	p.BorderPixel = p.Conn.X11Conn.DefaultBlackPixel()
 	p.BorderWidth = 1
+
+	if p.Floating {
+		// Detach from any Parent so Create roots it at the screen, letting the
+		// window manager treat it as a separate top-level window.
+		p.Parent = nil
+		p.ParentXID = 0
+		if p.Title == "" {
+			p.Title = "Open File"
+		}
+		p.Name = p.Title
+	}
 
 	p.SetWindowHandler(p)
 	if err := p.Window.Create(); err != nil {
@@ -155,11 +180,36 @@ func (p *FilePicker) HandleWindowEvent(ev events.Event) bool {
 			p.handleKey(p.Keymap.Lookup(e.Key, e.State))
 		}
 	case *events.ButtonPressEvent:
-		if e.Key == 1 {
+		switch e.Key {
+		case 1:
 			p.handleClick(int(e.EventY), e.Timestamp)
+		case btnWheelUp: // touchpad / wheel scroll up
+			p.scrollList(-wheelStep)
+		case btnWheelDown:
+			p.scrollList(wheelStep)
 		}
 	}
 	return true
+}
+
+// scrollList scrolls the visible window by d rows (clamped), leaving the
+// selection where it is — the wheel/touchpad scrolls the viewport.
+func (p *FilePicker) scrollList(d int) {
+	maxTop := len(p.entries) - p.rows()
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	nt := p.top + d
+	if nt < 0 {
+		nt = 0
+	}
+	if nt > maxTop {
+		nt = maxTop
+	}
+	if nt != p.top {
+		p.top = nt
+		_ = p.Draw()
+	}
 }
 
 func (p *FilePicker) handleKey(k keyboard.Event) {
