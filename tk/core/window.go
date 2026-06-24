@@ -7,6 +7,8 @@ package core
 
 import (
 	"fmt"
+	"image"
+
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
 	"github.com/X11Libre/go-x11proto/proto/core/request"
@@ -122,8 +124,48 @@ func (w Window) ClearArea(x, y base.INT16, width, height base.CARD16, exposures 
 	return rpc.ClearArea(w.Conn.X11Conn, w.XID, x, y, width, height, exposures)
 }
 
-// xaATOM is the predefined ATOM property type (XA_ATOM).
-const xaATOM base.ATOM = 4
+// xaATOM / xaCARDINAL are predefined property types (XA_ATOM, XA_CARDINAL).
+const (
+	xaATOM     base.ATOM = 4
+	xaCARDINAL base.ATOM = 6
+)
+
+// SetIconRGBA sets the window's icon via the EWMH _NET_WM_ICON property, which
+// modern window managers and taskbars use. rgba is width*height pixels, 4 bytes
+// each (R,G,B,A); the property stores them as 32-bit ARGB preceded by the size.
+func (w Window) SetIconRGBA(width, height int, rgba []byte) error {
+	if width <= 0 || height <= 0 || len(rgba) < width*height*4 {
+		return fmt.Errorf("SetIconRGBA: bad dimensions or short data")
+	}
+	data := make([]base.CARD32, 0, 2+width*height)
+	data = append(data, base.CARD32(width), base.CARD32(height))
+	for i := 0; i < width*height; i++ {
+		r := base.CARD32(rgba[i*4])
+		g := base.CARD32(rgba[i*4+1])
+		b := base.CARD32(rgba[i*4+2])
+		a := base.CARD32(rgba[i*4+3])
+		data = append(data, a<<24|r<<16|g<<8|b)
+	}
+	atom, err := w.Conn.InternAtom("_NET_WM_ICON")
+	if err != nil {
+		return err
+	}
+	return rpc.ChangeProperty32(w.Conn.X11Conn, 0 /*replace*/, w.XID, atom, xaCARDINAL, data)
+}
+
+// SetIcon sets the window icon from any image.Image.
+func (w Window) SetIcon(img image.Image) error {
+	b := img.Bounds()
+	width, height := b.Dx(), b.Dy()
+	rgba := make([]byte, 0, width*height*4)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA() // 16-bit, premultiplied
+			rgba = append(rgba, byte(r>>8), byte(g>>8), byte(bl>>8), byte(a>>8))
+		}
+	}
+	return w.SetIconRGBA(width, height, rgba)
+}
 
 // EnableWMDelete advertises the WM_DELETE_WINDOW protocol on this (top-level)
 // window, so the window manager sends a ClientMessage when the user closes it
