@@ -56,6 +56,8 @@ Legend:
 | `Raise` | ConfigureWindow (stack=Above) | OK | `TestTkWindowOps` |
 | `Lower` | ConfigureWindow (stack=Below) | OK | `TestTkWindowOps` |
 | `SetBackgroundPixmap` | ChangeWindowAttributes (background-pixmap) | OK | `TestTkSetBackgroundPixmap` |
+| `SetIcon` / `SetIconRGBA` | ChangeProperty (_NET_WM_ICON) | RT | `TestTkSetIcon` (property layout verified) |
+| `EnableWMDelete` / `IsWMDelete` | ChangeProperty (WM_PROTOCOLS) | RT | `TestTkWMDelete`, `TestIsWMDelete` |
 
 ## Connection / resource helpers
 

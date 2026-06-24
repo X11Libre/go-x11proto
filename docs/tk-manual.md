@@ -249,6 +249,9 @@ func (w Window)  Move(x, y) / Resize(w, h) / MoveResize(x, y, w, h) error
 func (w Window)  Raise() / Lower() error
 func (w Window)  ClearArea(x, y, w, h base.CARD16, exposures bool) error
 func (w Window)  SetName(string) error
+func (w Window)  SetIcon(image.Image) error             // _NET_WM_ICON (WM/taskbar icon)
+func (w Window)  SetIconRGBA(w, h int, rgba []byte) error
+func (w Window)  EnableWMDelete() (base.ATOM, error)    // graceful WM close (see §17)
 func (w Window)  SetBackgroundPixmap(base.PIXMAP) error // tk_core.ParentRelative for "transparent"
 func (w Window)  SetOverrideRedirect(bool) error        // popups the WM should ignore
 func (w Window)  Reparent / MapSubwindows / CirculateUp / … // less common
