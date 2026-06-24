@@ -2,8 +2,11 @@ package main
 
 import (
 	_ "embed"
+	"image"
 	"log"
 	"os"
+
+	xdraw "golang.org/x/image/draw"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
@@ -39,7 +42,13 @@ func (w *MyWindow) Init() {
 			w.Window.SetBackgroundPixmap(pixmap)
 			w.bgPixmap = pixmap
 		}
-		_ = w.Window.SetIconRGBA(img.Width, img.Height, img.Data) // window icon
+		// window icon: scale the 256x256 logo down (a full-size icon would
+		// exceed a single X request)
+		src := &image.NRGBA{Pix: img.Data, Stride: img.Width * 4,
+			Rect: image.Rect(0, 0, img.Width, img.Height)}
+		icon := image.NewNRGBA(image.Rect(0, 0, 48, 48))
+		xdraw.ApproxBiLinear.Scale(icon, icon.Bounds(), src, src.Bounds(), xdraw.Src, nil)
+		_ = w.Window.SetIcon(icon)
 	}
 
 	w.Window.Map()
