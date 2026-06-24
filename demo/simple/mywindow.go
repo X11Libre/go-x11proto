@@ -78,11 +78,12 @@ func (w *MyWindow) Init() {
 			X:        0, Y: 0, W: 500,
 		},
 	}
-	w.Menu.AddMenu("File", []tk_widget.MenuItem{
+	fileMenu := w.Menu.AddMenu("File", []tk_widget.MenuItem{
 		{Label: "Open", OnClick: func() { log.Printf("menu: File / Open\n") }},
 		{Label: "Save", OnClick: func() { log.Printf("menu: File / Save\n") }},
 		{Label: "Quit", OnClick: func() { log.Printf("menu: File / Quit\n"); os.Exit(0) }},
 	})
+	fileMenu.TearOff = true // detachable: click the dashed handle at the top
 	w.Menu.AddMenu("Edit", []tk_widget.MenuItem{
 		{Label: "Cut", OnClick: func() { log.Printf("menu: Edit / Cut\n") }},
 		{Label: "Copy", OnClick: func() { log.Printf("menu: Edit / Copy\n") }},
