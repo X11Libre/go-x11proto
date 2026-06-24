@@ -39,6 +39,7 @@ func (w *MyWindow) Init() {
 			w.Window.SetBackgroundPixmap(pixmap)
 			w.bgPixmap = pixmap
 		}
+		_ = w.Window.SetIconRGBA(img.Width, img.Height, img.Data) // window icon
 	}
 
 	w.Window.Map()
