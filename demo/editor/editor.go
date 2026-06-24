@@ -21,6 +21,8 @@ import (
 const (
 	barH = 22 // menu bar / status line height
 	sbW  = 16 // scrollbar width
+	winX = 100
+	winY = 100
 	winW = 700
 	winH = 500
 )
@@ -61,7 +63,7 @@ func (e *Editor) Init(filename string) error {
 	e.frame = &tk_widget.Frame{Window: tk_core.Window{
 		Drawable: tk_core.Drawable{Conn: e.tk},
 		Name:     "go-xedit",
-		X:        100, Y: 100, W: winW, H: winH,
+		X:        winX, Y: winY, W: winW, H: winH,
 	}}
 	if err := e.frame.Init(); err != nil {
 		return err
@@ -226,12 +228,16 @@ func (e *Editor) open() {
 		return
 	}
 	const pw, ph = 460, 360
+	// A separate, window-manager-managed window centered over the editor
+	// (X/Y are screen coordinates for a floating window).
 	p := &dialog.FilePicker{
 		Window: tk_core.Window{
-			Drawable: tk_core.Drawable{Conn: e.tk}, Parent: &e.frame.Window,
-			X: (winW - pw) / 2, Y: (winH - ph) / 2, W: pw, H: ph,
+			Drawable: tk_core.Drawable{Conn: e.tk},
+			X:        winX + (winW-pw)/2, Y: winY + (winH-ph)/2, W: pw, H: ph,
 		},
-		Font: e.font,
+		Font:     e.font,
+		Floating: true,
+		Title:    "Open File",
 	}
 	p.OnAccept = func(path string) { e.closePicker(); e.loadFile(path) }
 	p.OnCancel = func() { e.closePicker() }
