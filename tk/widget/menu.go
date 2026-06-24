@@ -48,6 +48,11 @@ type Menu struct {
 	tk_core.Window
 	Items []MenuItem
 
+	// TearOff adds a dashed handle at the top of the menu; clicking it detaches
+	// a persistent, window-manager-managed copy that stays open (like the old
+	// GTK tear-off menus). Set it before Init / Popup.
+	TearOff bool
+
 	gc   *tk_core.GC // black-on-white text + separator/highlight fill
 	gcHi *tk_core.GC // white-on-black text for the highlighted item
 	font base.FONT
@@ -60,6 +65,8 @@ type Menu struct {
 	childItem int   // item index that opened child, -1 = none
 	subs      map[int]*Menu
 	rx, ry    base.INT16 // window position in root coordinates
+	detached  bool       // a torn-off, persistent copy (no grab, WM-managed)
+	wmDelete  base.ATOM  // WM_DELETE_WINDOW atom (detached menus)
 
 	// onBarHover, when set on the top menu (by a MenuBar), is called with the
 	// pointer's root position while it is outside the whole cascade — letting the
@@ -117,6 +124,9 @@ func (m *Menu) Init() error {
 func (m *Menu) layout() {
 	m.itemY = make([]int, len(m.Items)+1)
 	y, hasSub := 0, false
+	if m.TearOff && !m.detached {
+		y = tearRowH // reserve the tear-off handle row at the top
+	}
 	for i, it := range m.Items {
 		m.itemY[i] = y
 		if it.Separator {
@@ -262,6 +272,9 @@ func (m *Menu) itemAtRoot(rx, ry base.INT16) int {
 		return -1
 	}
 	yy := int(ry) - int(m.ry)
+	if m.TearOff && !m.detached && yy < tearRowH {
+		return tearIndex
+	}
 	for i := range m.Items {
 		if yy >= m.itemY[i] && yy < m.itemY[i+1] {
 			return i
@@ -276,6 +289,12 @@ func (m *Menu) selectable(i int) bool {
 
 func (m *Menu) draw() {
 	m.ClearArea(0, 0, 0, 0, false)
+	if m.TearOff && !m.detached {
+		// a dashed handle across the top
+		for x := 5; x < int(m.W)-4; x += 6 {
+			m.FillRect(m.gc.XID, base.INT16(x), tearRowH/2, 3, 1)
+		}
+	}
 	for i, it := range m.Items {
 		y0 := base.INT16(m.itemY[i])
 		if it.Separator {
@@ -353,6 +372,13 @@ func (top *Menu) handleRelease(rx, ry base.INT16) {
 		return
 	}
 	i := cur.itemAtRoot(rx, ry)
+	if pressIdx == tearIndex { // clicked the tear-off handle: detach a copy
+		if i == tearIndex {
+			top.closeAll()
+			cur.tearOff()
+		}
+		return
+	}
 	if i != pressIdx || !cur.selectable(i) || cur.Items[i].Submenu != nil {
 		return
 	}
@@ -366,6 +392,9 @@ func (top *Menu) handleRelease(rx, ry base.INT16) {
 // HandleWindowEvent is the tk WindowHandler. Each menu window draws itself on
 // Expose; pointer events (delivered to the top via the grab) drive the cascade.
 func (m *Menu) HandleWindowEvent(ev events.Event) bool {
+	if m.detached {
+		return m.handleDetached(ev)
+	}
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		m.draw()
