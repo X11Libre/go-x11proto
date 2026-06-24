@@ -65,8 +65,14 @@ type Menu struct {
 	childItem int   // item index that opened child, -1 = none
 	subs      map[int]*Menu
 	rx, ry    base.INT16 // window position in root coordinates
-	detached  bool       // a torn-off, persistent copy (no grab, WM-managed)
-	wmDelete  base.ATOM  // WM_DELETE_WINDOW atom (detached menus)
+	detached  bool       // a torn-off, persistent copy (own frame, no grab)
+
+	// drag state for a detached menu: the handle row doubles as a title bar —
+	// dragging it moves the window, a plain click on it re-attaches (closes).
+	dragging       bool
+	dragMoved      bool
+	dragRX, dragRY base.INT16 // pointer root position at drag start
+	dragWX, dragWY base.INT16 // window position at drag start
 
 	// onBarHover, when set on the top menu (by a MenuBar), is called with the
 	// pointer's root position while it is outside the whole cascade — letting the
@@ -124,8 +130,8 @@ func (m *Menu) Init() error {
 func (m *Menu) layout() {
 	m.itemY = make([]int, len(m.Items)+1)
 	y, hasSub := 0, false
-	if m.TearOff && !m.detached {
-		y = tearRowH // reserve the tear-off handle row at the top
+	if m.tearHandle() {
+		y = tearRowH // reserve the tear-off / drag handle row at the top
 	}
 	for i, it := range m.Items {
 		m.itemY[i] = y
@@ -272,7 +278,7 @@ func (m *Menu) itemAtRoot(rx, ry base.INT16) int {
 		return -1
 	}
 	yy := int(ry) - int(m.ry)
-	if m.TearOff && !m.detached && yy < tearRowH {
+	if m.tearHandle() && yy < tearRowH {
 		return tearIndex
 	}
 	for i := range m.Items {
@@ -289,8 +295,9 @@ func (m *Menu) selectable(i int) bool {
 
 func (m *Menu) draw() {
 	m.ClearArea(0, 0, 0, 0, false)
-	if m.TearOff && !m.detached {
-		// a dashed handle across the top
+	if m.tearHandle() {
+		// a dashed handle across the top (tear-off in a popup, drag/re-attach
+		// title bar in a detached menu)
 		for x := 5; x < int(m.W)-4; x += 6 {
 			m.FillRect(m.gc.XID, base.INT16(x), tearRowH/2, 3, 1)
 		}
