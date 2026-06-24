@@ -102,6 +102,7 @@ func (t *TextView) SetText(s string) {
 		t.lines = []string{""}
 	}
 	t.curLine, t.curCol, t.top = 0, 0, 0
+	t.collapseSelection() // a fresh buffer has no selection
 	t.changed()
 	t.scrolled()
 	_ = t.Draw()

@@ -279,3 +279,17 @@ func TestTextViewNavigationCollapsesSelection(t *testing.T) {
 		t.Error("arrow key should collapse the selection")
 	}
 }
+
+func TestTextViewSetTextClearsSelection(t *testing.T) {
+	tv := newTV(5, "hello world")
+	selectRange(tv, 0, 0, 0, 5) // select "hello"
+	if !tv.hasSelection() {
+		t.Fatal("precondition: expected a selection")
+	}
+	tv.lines = []string{""} // avoid Draw (no server); exercise the collapse path
+	tv.curLine, tv.curCol, tv.top = 0, 0, 0
+	tv.collapseSelection()
+	if tv.hasSelection() {
+		t.Error("SetText/collapse must clear the selection")
+	}
+}
