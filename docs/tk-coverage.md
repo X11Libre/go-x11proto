@@ -76,7 +76,7 @@ Legend:
 | `Label` | single line of text via a pluggable `TextRenderer`; Align left/center/right; optional ParentRelative ("transparent") background | OK | `TestTkLabel`, `TestLabelAlignX` (offline) |
 | `Menu` | override-redirect popup with separators and cascading submenus; press-drag-release selection driven by one pointer grab on the top menu | OK | `TestTkMenu`, `TestTkContextMenu` (separators + 3-layer submenus) |
 | `MenuBar` | horizontal title strip; a press pops up the title's `Menu` below it | OK | `TestTkMenu` |
-| `Button` | labelled push button, up/down repaint, OnButtonPress | OK | exercised by the simple demo |
+| `Button` | bordered push button: centred label (tk/font), inverted while pressed, OnButtonPress | OK | exercised by the simple demo and `dialog.Confirm` (`TestTkConfirm`) |
 | `TextView` | multi-line editable text: caret, insert/delete/nav, Tab (expanded), Shift+nav & mouse selection, undo/redo, find/replace, vertical+horizontal & wheel scroll; OnChange/OnScroll/OnSelect/OnKey hooks | OK | `TestTextView*`, `TestSearchFrom`, `TestReplaceAll`, `TestFindNext` (offline), `TestTkTextView`, `TestTkWheelScroll` (live) |
 | `Scrollbar` | vertical track + thumb sized to the line range; click-to-page, drag-to-scroll; OnScroll | OK | `TestThumbGeom*` (offline), `TestTkScrollbar` (live, bound to a TextView) |
 | `Frame` | border layout (Top/Bottom/Left/Right/Center), re-lays children on resize | OK | `TestBorderLayout*` (offline), `TestTkFrame` (live geometry) |
@@ -139,7 +139,7 @@ Reusable dialog windows built on the toolkit.
 | API | Role | Status | Test |
 |-----|------|--------|------|
 | `FilePicker` (`Init` / `Open` / `Draw` / `CurrentDir`) | file-open chooser: listing, selection, scroll, keyboard + mouse navigation; `Floating` option | OK | `TestTkFilePicker`, `TestTkFilePickerFloating` (live), `TestArrange*`/`TestTarget`/`TestClampSel`/`TestScrollTop`/`TestReadDirLive` (offline) |
-| `Confirm` (`Init` / `Draw`) | yes/no dialog (Enter/y, Esc/n); `Floating` option | OK | `TestTkConfirm` (live, both callbacks) |
+| `Confirm` (`Init` / `Draw`) | yes/no dialog: two Button widgets + keyboard (Enter/y, Esc/n); `Floating` option | OK | `TestTkConfirm` (live, both callbacks) |
 
 ## RENDER (tk/render)
 

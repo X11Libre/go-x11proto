@@ -398,10 +398,16 @@ OVER" overlay).
 
 ### `Button`
 
+A bordered push button with a centred label (drawn inverted while pressed).
+`Init` returns an error; Label falls back to the window Name, and Font defaults
+to "fixed" when nil.
+
 ```go
 btn := &tk_widget.Button{
 	Window:        tk_core.Window{Drawable: tk_core.Drawable{Conn: &tk}, Parent: &win,
-		Name: "OK", X: 10, Y: 10, W: 80, H: 30, EventMask: 0xFFFFFF},
+		X: 10, Y: 10, W: 80, H: 30},
+	Label:         "OK",
+	Font:          f, // optional
 	OnButtonPress: func() { /* clicked */ },
 }
 btn.Init()
@@ -665,9 +671,10 @@ optional `Title`) to make it a separate, window-manager-managed top-level window
 instead — its own title bar, movable — in which case `X`/`Y` are screen
 coordinates.
 
-`Confirm` is a small yes/no dialog (message + key hint): Enter or `y` fires
-`OnYes`, Escape or `n` fires `OnNo`. It also supports `Floating`/`Title`. Use it
-for "Discard unsaved changes?"-style guards.
+`Confirm` is a small yes/no dialog: a message above two push buttons (Button
+widgets; labels via YesLabel/NoLabel). Click a button or use the keyboard —
+Enter / `y` fires `OnYes`, Escape / `n` fires `OnNo`. It also supports
+`Floating`/`Title`. Use it for "Discard unsaved changes?"-style guards.
 
 ```go
 c := &dialog.Confirm{
