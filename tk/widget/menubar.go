@@ -28,6 +28,9 @@ type MenuBar struct {
 	gc      *tk_core.GC
 	font    base.FONT
 	entries []*barEntry
+
+	openIdx            int // index of the currently open menu, -1 = none
+	barRootX, barRootY int // the bar's top-left in root coordinates
 }
 
 // AddMenu appends a titled menu and returns it (so callers can keep a handle).
@@ -39,6 +42,7 @@ func (b *MenuBar) AddMenu(title string, items []MenuItem) *Menu {
 
 // Init creates the bar window, lays out the titles and creates the menus.
 func (b *MenuBar) Init() error {
+	b.openIdx = -1
 	if b.font.Invalid() {
 		f, err := b.Conn.GetFont("fixed")
 		if err != nil {
@@ -89,16 +93,43 @@ func (b *MenuBar) HandleWindowEvent(ev events.Event) bool {
 	case *events.ExposeEvent:
 		b.draw()
 	case *events.ButtonPressEvent:
-		for _, en := range b.entries {
+		for i, en := range b.entries {
 			if int(e.EventX) >= en.x0 && int(e.EventX) < en.x1 {
-				// the bar's root origin = press-root minus press-in-window;
-				// drop the menu just below the bar at the title's left edge.
-				rootX := base.INT16(int(e.RootX) - int(e.EventX) + en.x0)
-				rootY := base.INT16(int(e.RootY) - int(e.EventY) + menuBarHeight)
-				_ = en.menu.Popup(rootX, rootY)
+				// the bar's root origin = press-root minus press-in-window.
+				b.barRootX = int(e.RootX) - int(e.EventX)
+				b.barRootY = int(e.RootY) - int(e.EventY)
+				b.openMenu(i)
 				break
 			}
 		}
 	}
 	return true
+}
+
+// openMenu pops up entry i's menu just below its title and arms hover-switching.
+func (b *MenuBar) openMenu(i int) {
+	en := b.entries[i]
+	en.menu.onBarHover = b.hoverSwitch
+	b.openIdx = i
+	_ = en.menu.Popup(base.INT16(b.barRootX+en.x0), base.INT16(b.barRootY+menuBarHeight))
+}
+
+// hoverSwitch is called by the open menu when the pointer is over the bar but
+// outside the cascade; if it is over a different title, switch to that menu.
+func (b *MenuBar) hoverSwitch(rx, ry base.INT16) {
+	lx, ly := int(rx)-b.barRootX, int(ry)-b.barRootY
+	if ly < 0 || ly >= menuBarHeight {
+		return // not over the bar strip
+	}
+	for i, en := range b.entries {
+		if lx >= en.x0 && lx < en.x1 {
+			if i != b.openIdx {
+				if b.openIdx >= 0 {
+					b.entries[b.openIdx].menu.Close()
+				}
+				b.openMenu(i)
+			}
+			return
+		}
+	}
 }

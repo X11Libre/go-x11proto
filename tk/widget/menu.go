@@ -61,6 +61,11 @@ type Menu struct {
 	subs      map[int]*Menu
 	rx, ry    base.INT16 // window position in root coordinates
 
+	// onBarHover, when set on the top menu (by a MenuBar), is called with the
+	// pointer's root position while it is outside the whole cascade — letting the
+	// bar switch to another menu when the pointer slides over its titles.
+	onBarHover func(rx, ry base.INT16)
+
 	// press tracking (top-of-cascade only): a release selects only when it
 	// matches a press on the same item, so the click that opened the menu (whose
 	// press landed outside, before the grab) does not select anything.
@@ -300,7 +305,12 @@ func (m *Menu) draw() {
 func (top *Menu) handleMotion(rx, ry base.INT16) {
 	cur := top.deepestContaining(rx, ry)
 	if cur == nil {
-		return // between menus: keep the cascade as-is
+		// outside the cascade: let a menu bar switch menus if the pointer is
+		// over one of its other titles.
+		if top.onBarHover != nil {
+			top.onBarHover(rx, ry)
+		}
+		return // otherwise keep the cascade as-is
 	}
 	i := cur.itemAtRoot(rx, ry)
 	newHi := -1
