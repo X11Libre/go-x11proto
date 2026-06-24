@@ -18,6 +18,20 @@ import (
 // *RequestError whose Code can be compared against proto/core/errorcode.
 func (c *X11Conn) CheckRequest(req base.Request) error {
 	c.writeMu.Lock()
+
+	// encode both requests (validating length) before allocating any sequence
+	// numbers, so a rejection here cannot desync the connection.
+	reqBytes, err := c.encodeRequest(req)
+	if err != nil {
+		c.writeMu.Unlock()
+		return c.errorF("CheckRequest(): %w", err)
+	}
+	barrierBytes, err := c.encodeRequest(&request.GetInputFocusRequest{})
+	if err != nil {
+		c.writeMu.Unlock()
+		return c.errorF("CheckRequest(): %w", err)
+	}
+
 	if c.nextSeq == 0 {
 		c.nextSeq++
 	}
@@ -32,7 +46,7 @@ func (c *X11Conn) CheckRequest(req base.Request) error {
 	c.pending[seq] = pr
 	c.pendingMu.Unlock()
 
-	if err := c.writeRequest(req, seq); err != nil {
+	if _, err := c.conn.Write(reqBytes); err != nil {
 		c.removePending(seq)
 		c.writeMu.Unlock()
 		return c.errorF("CheckRequest(): %w", err)
@@ -50,7 +64,7 @@ func (c *X11Conn) CheckRequest(req base.Request) error {
 	c.pending[bseq] = bpr
 	c.pendingMu.Unlock()
 
-	if err := c.writeRequest(&request.GetInputFocusRequest{}, bseq); err != nil {
+	if _, err := c.conn.Write(barrierBytes); err != nil {
 		c.removePending(seq)
 		c.removePending(bseq)
 		c.writeMu.Unlock()

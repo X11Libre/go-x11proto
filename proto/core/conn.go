@@ -251,6 +251,13 @@ func (c *X11Conn) Send(req base.Request) (base.CARD16, error) {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 
+	// encode (and validate) before consuming a sequence number, so a rejected
+	// request does not desync our request count from the server's.
+	b, err := c.encodeRequest(req)
+	if err != nil {
+		return 0, c.errorF("Send(): %w", err)
+	}
+
 	// first sequence number is 1
 	if c.nextSeq == 0 {
 		c.nextSeq++
@@ -263,7 +270,7 @@ func (c *X11Conn) Send(req base.Request) (base.CARD16, error) {
 		log.Printf("=> [seq %d] %T %+v", seq, req, req)
 	}
 
-	if err := c.writeRequest(req, seq); err != nil {
+	if _, err := c.conn.Write(b); err != nil {
 		return 0, c.errorF("Send(): %w", err)
 	}
 	return seq, nil
@@ -271,6 +278,12 @@ func (c *X11Conn) Send(req base.Request) (base.CARD16, error) {
 
 func (c *X11Conn) SendAndWait(req base.Request) (*base.ReplyReader, error) {
 	c.writeMu.Lock()
+
+	b, err := c.encodeRequest(req)
+	if err != nil {
+		c.writeMu.Unlock()
+		return nil, c.errorF("SendAndWait(): %w", err)
+	}
 
 	// first sequence number is 1
 	if c.nextSeq == 0 {
@@ -293,7 +306,7 @@ func (c *X11Conn) SendAndWait(req base.Request) (*base.ReplyReader, error) {
 		log.Printf("=> [seq %d] %T %+v", seq, req, req)
 	}
 
-	if err := c.writeRequest(req, seq); err != nil {
+	if _, err := c.conn.Write(b); err != nil {
 		c.removePending(seq)
 		c.writeMu.Unlock()
 		return nil, c.errorF("SendAndWait(): %w", err)
@@ -329,6 +342,12 @@ type ReplyIterator struct {
 func (c *X11Conn) SendAndIterate(req base.Request) (*ReplyIterator, error) {
 	c.writeMu.Lock()
 
+	b, err := c.encodeRequest(req)
+	if err != nil {
+		c.writeMu.Unlock()
+		return nil, c.errorF("SendAndIterate(): %w", err)
+	}
+
 	// first sequence number is 1
 	if c.nextSeq == 0 {
 		c.nextSeq++
@@ -351,7 +370,7 @@ func (c *X11Conn) SendAndIterate(req base.Request) (*ReplyIterator, error) {
 		log.Printf("=> [seq %d] %T %+v (multi)", seq, req, req)
 	}
 
-	if err := c.writeRequest(req, seq); err != nil {
+	if _, err := c.conn.Write(b); err != nil {
 		c.removePending(seq)
 		c.writeMu.Unlock()
 		return nil, c.errorF("SendAndIterate(): %w", err)
@@ -483,14 +502,29 @@ func (c *X11Conn) Close() {
 	c.closeWithError(nil)
 }
 
-func (c *X11Conn) writeRequest(req base.Request, seq base.CARD16) error {
+// encodeRequest serialises req to its wire bytes and validates its length. It
+// allocates no sequence number and writes nothing, so a rejection here (e.g. an
+// over-long request) leaves the connection untouched — callers must encode
+// before allocating a sequence number, or the server's request count would
+// drift from ours and desync replies.
+func (c *X11Conn) encodeRequest(req base.Request) ([]byte, error) {
 	writer := base.MakeRequestWriter(c.BE)
 	if err := req.WriteInto(&writer); err != nil {
-		return err
+		return nil, err
 	}
-
-	_, err := c.conn.Write(writer.ToBytes())
-	return err
+	b := writer.ToBytes()
+	// The request length is a CARD16 count of 4-byte units; a request longer
+	// than the server's maximum (at most 0xffff without BIG-REQUESTS) would wrap
+	// that field and desync the connection. Refuse it cleanly instead.
+	units := len(b) / 4
+	max := int(c.Setup.MaxRequestSize)
+	if max == 0 || max > 0xffff {
+		max = 0xffff
+	}
+	if units > max {
+		return nil, c.errorF("request %T is %d units, exceeds the server maximum of %d (BIG-REQUESTS not supported)", req, units, max)
+	}
+	return b, nil
 }
 
 func (c *X11Conn) DefaultRoot() base.WINDOW {
