@@ -210,7 +210,7 @@ func (t *TextView) HandleWindowEvent(ev events.Event) bool {
 		_ = t.Draw()
 	case *events.ButtonPressEvent:
 		if e.Key == 1 { // left button: place cursor and begin selecting
-			t.focus()
+			t.Focus()
 			t.placeCursor(int(e.EventX), int(e.EventY))
 			t.collapseSelection()
 			t.selecting = true
@@ -243,8 +243,10 @@ func (t *TextView) HandleWindowEvent(ev events.Event) bool {
 	return true
 }
 
-// focus requests the keyboard focus so typing reaches this widget.
-func (t *TextView) focus() {
+// Focus requests the keyboard focus so typing reaches this widget. It is called
+// automatically on a button press, but an app can also call it directly (e.g.
+// after dismissing a dialog).
+func (t *TextView) Focus() {
 	_ = rpc.SetInputFocus(t.Conn.X11Conn, 2 /*RevertToParent*/, t.XID, 0)
 }
 

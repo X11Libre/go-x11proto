@@ -13,11 +13,16 @@ import (
 //   - a normal item has a Label and an OnClick;
 //   - an item with a non-nil Submenu cascades to a child menu (OnClick ignored);
 //   - an item with Separator set is a non-selectable divider (Label ignored).
+//
+// Accel is an optional accelerator shown right-aligned (e.g. "Ctrl+O"). If it
+// parses (see parseAccel), MenuBar.HandleKey / Menu.HandleKey will fire the
+// item's OnClick when a matching key is pressed.
 type MenuItem struct {
 	Label     string
 	OnClick   func()
 	Submenu   []MenuItem
 	Separator bool
+	Accel     string
 }
 
 // menu layout metrics (pixels, sized for the "fixed" font).
@@ -28,6 +33,7 @@ const (
 	menuTextBase   = 14
 	menuCharW      = 7
 	menuArrowW     = 14 // reserved column for the submenu arrow
+	menuAccelGap   = 3 * menuCharW
 )
 
 // Menu is a popup menu with separators and cascading submenus. Pop it up with
@@ -47,6 +53,7 @@ type Menu struct {
 	font base.FONT
 
 	itemY     []int // itemY[i] = top of item i; itemY[len] = total height
+	hasSub    bool  // any item has a submenu (reserves the arrow column)
 	hi        int   // highlighted selectable item, -1 = none
 	parent    *Menu // menu that opened this one (nil = top of cascade)
 	child     *Menu // currently open submenu of this menu
@@ -117,14 +124,24 @@ func (m *Menu) layout() {
 		}
 	}
 	m.itemY[len(m.Items)] = y
+	m.hasSub = hasSub
 
-	w := 1
+	maxLabel, maxAccel := 1, 0
 	for _, it := range m.Items {
-		if !it.Separator && len(it.Label) > w {
-			w = len(it.Label)
+		if it.Separator {
+			continue
+		}
+		if len(it.Label) > maxLabel {
+			maxLabel = len(it.Label)
+		}
+		if len(it.Accel) > maxAccel {
+			maxAccel = len(it.Accel)
 		}
 	}
-	pix := w*menuCharW + 2*menuPadX
+	pix := maxLabel*menuCharW + 2*menuPadX
+	if maxAccel > 0 {
+		pix += menuAccelGap + maxAccel*menuCharW
+	}
 	if hasSub {
 		pix += menuArrowW
 	}
@@ -266,6 +283,14 @@ func (m *Menu) draw() {
 			text = m.gcHi
 		}
 		m.PutText8(text.XID, menuPadX, y0+menuTextBase, it.Label)
+		if it.Accel != "" {
+			right := int(m.W) - menuPadX
+			if m.hasSub {
+				right -= menuArrowW
+			}
+			ax := right - len(it.Accel)*menuCharW
+			m.PutText8(text.XID, base.INT16(ax), y0+menuTextBase, it.Accel)
+		}
 		if it.Submenu != nil {
 			m.PutText8(text.XID, base.INT16(int(m.W)-menuArrowW), y0+menuTextBase, ">")
 		}
