@@ -757,6 +757,10 @@ bitmap-font `TextRenderer`.
   the wire codecs handle swapping. The test suite exercises both.
 - **Errors.** Protocol errors surface as `*proto/core.RequestError` (with
   `Code`, `MajorOpcode`, …); check with `errors.As`.
+- **Large requests.** BIG-REQUESTS is negotiated automatically on connect, so a
+  request larger than 65535 4-byte units (e.g. a full-size `_NET_WM_ICON` or a
+  big `ChangeProperty`) is sent transparently; one beyond the server's maximum
+  is rejected with a clear error rather than corrupting the connection.
 
 For the per-request and per-widget test matrix, see
 [tk-coverage.md](tk-coverage.md).
