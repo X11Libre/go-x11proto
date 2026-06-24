@@ -328,3 +328,161 @@ func TestTextViewTabWidthDefault(t *testing.T) {
 		t.Errorf("default tab width: %q", got)
 	}
 }
+
+func TestTextViewTabInput(t *testing.T) {
+	tv := newTV(5)
+	typeRunes(tv, "a")
+	tv.edit(keyboard.Event{Key: keyboard.KeyTab})
+	typeRunes(tv, "b")
+	if got := tv.Text(); got != "a\tb" {
+		t.Errorf("Tab input = %q, want %q", got, "a\tb")
+	}
+}
+
+func TestTextViewShiftSelection(t *testing.T) {
+	tv := newTV(5, "hello world")
+	seek(tv, 0, 0)
+	// Shift+Right three times selects "hel"
+	for i := 0; i < 3; i++ {
+		tv.edit(keyboard.Event{Key: keyboard.KeyRight, Shift: true})
+	}
+	if !tv.hasSelection() || tv.SelectedText() != "hel" {
+		t.Errorf("shift-select = %q (sel=%v), want \"hel\"", tv.SelectedText(), tv.hasSelection())
+	}
+	// a plain (no-shift) move collapses it
+	tv.edit(keyboard.Event{Key: keyboard.KeyRight})
+	if tv.hasSelection() {
+		t.Error("plain Right should collapse the selection")
+	}
+}
+
+func TestTextViewShiftHomeEnd(t *testing.T) {
+	tv := newTV(5, "abcdef")
+	seek(tv, 0, 6)
+	tv.edit(keyboard.Event{Key: keyboard.KeyHome, Shift: true})
+	if tv.SelectedText() != "abcdef" {
+		t.Errorf("Shift+Home = %q, want whole line", tv.SelectedText())
+	}
+}
+
+func TestTextViewSelectAll(t *testing.T) {
+	tv := newTV(5, "abc", "de")
+	tv.SelectAll()
+	if tv.SelectedText() != "abc\nde" {
+		t.Errorf("SelectAll = %q, want %q", tv.SelectedText(), "abc\nde")
+	}
+}
+
+func TestTextViewUndoRedo(t *testing.T) {
+	tv := newTV(5)
+	typeRunes(tv, "abc") // 3 undoable inserts
+	if tv.Text() != "abc" {
+		t.Fatalf("typed %q", tv.Text())
+	}
+	tv.Undo()
+	tv.Undo()
+	if tv.Text() != "a" {
+		t.Errorf("after 2 undos = %q, want %q", tv.Text(), "a")
+	}
+	tv.Redo()
+	if tv.Text() != "ab" {
+		t.Errorf("after redo = %q, want %q", tv.Text(), "ab")
+	}
+	// a new edit clears the redo stack
+	typeRunes(tv, "X")
+	tv.Redo() // no-op now
+	if tv.Text() != "abX" {
+		t.Errorf("after edit+redo = %q, want %q", tv.Text(), "abX")
+	}
+}
+
+func TestTextViewUndoDelete(t *testing.T) {
+	tv := newTV(5, "hello world")
+	selectRange(tv, 0, 0, 0, 6) // "hello "
+	tv.DeleteSelection()
+	if tv.Text() != "world" {
+		t.Fatalf("after delete = %q", tv.Text())
+	}
+	tv.Undo()
+	if tv.Text() != "hello world" {
+		t.Errorf("undo delete = %q, want original", tv.Text())
+	}
+}
+
+func TestTextViewCompoundEditIsOneUndo(t *testing.T) {
+	// typing over a selection (delete + insert) must be a single undo step.
+	tv := newTV(5, "hello world")
+	selectRange(tv, 0, 0, 0, 5) // "hello"
+	tv.edit(keyboard.Event{Rune: 'X'})
+	if tv.Text() != "X world" {
+		t.Fatalf("type-over = %q", tv.Text())
+	}
+	tv.Undo()
+	if tv.Text() != "hello world" {
+		t.Errorf("one undo should restore both delete+insert: %q", tv.Text())
+	}
+}
+
+func TestSearchFrom(t *testing.T) {
+	lines := []string{"foo bar", "baz foo", "qux"}
+	// forward from start
+	if l, c, ok := searchFrom(lines, "foo", 0, 0); !ok || l != 0 || c != 0 {
+		t.Errorf("first foo = (%d,%d,%v), want (0,0,true)", l, c, ok)
+	}
+	// next foo after the first
+	if l, c, ok := searchFrom(lines, "foo", 0, 1); !ok || l != 1 || c != 4 {
+		t.Errorf("next foo = (%d,%d,%v), want (1,4,true)", l, c, ok)
+	}
+	// wrap around back to line 0
+	if l, c, ok := searchFrom(lines, "foo", 1, 5); !ok || l != 0 || c != 0 {
+		t.Errorf("wrapped foo = (%d,%d,%v), want (0,0,true)", l, c, ok)
+	}
+	// not found
+	if _, _, ok := searchFrom(lines, "zzz", 0, 0); ok {
+		t.Error("zzz should not be found")
+	}
+}
+
+func TestSearchFromRuneIndex(t *testing.T) {
+	// multibyte before the match: column must be a rune index, not a byte index.
+	lines := []string{"äöü-target"}
+	l, c, ok := searchFrom(lines, "target", 0, 0)
+	if !ok || l != 0 || c != 4 {
+		t.Errorf("got (%d,%d,%v), want (0,4,true)", l, c, ok)
+	}
+}
+
+func TestReplaceAll(t *testing.T) {
+	tv := newTV(5, "a x a", "x a x")
+	n := tv.ReplaceAll("x", "Y")
+	if n != 3 {
+		t.Errorf("replaced %d, want 3", n)
+	}
+	if tv.Text() != "a Y a\nY a Y" {
+		t.Errorf("after replace = %q", tv.Text())
+	}
+	// undoable
+	tv.Undo()
+	if tv.Text() != "a x a\nx a x" {
+		t.Errorf("undo replace = %q", tv.Text())
+	}
+}
+
+func TestFindNextSelectsMatch(t *testing.T) {
+	tv := newTV(5, "one two three two")
+	seek(tv, 0, 0)
+	if !tv.FindNext("two") {
+		t.Fatal("FindNext should find 'two'")
+	}
+	if tv.SelectedText() != "two" {
+		t.Errorf("selected %q, want 'two'", tv.SelectedText())
+	}
+	// next match
+	tv.FindNext("two")
+	if tv.SelectedText() != "two" {
+		t.Errorf("second match selected %q", tv.SelectedText())
+	}
+	if tv.curCol != 17 { // end of the second "two" at col 14..17
+		t.Errorf("cursor col = %d, want 17", tv.curCol)
+	}
+}

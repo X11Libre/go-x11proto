@@ -52,8 +52,20 @@ type TextView struct {
 	anchorCol  int
 	selecting  bool
 
-	top int // first visible line
+	top    int // first visible line
+	leftPx int // horizontal scroll offset in pixels
+
+	undo, redo []tvSnapshot
+	recording  bool // an undo snapshot has been taken for the current action
 }
+
+// tvSnapshot is an undo/redo entry: a copy of the buffer plus the cursor.
+type tvSnapshot struct {
+	lines     []string
+	line, col int
+}
+
+const undoLimit = 500
 
 // Init creates and maps the text view, builds its GC, and loads the keyboard
 // map. Font must be set first.
@@ -102,8 +114,9 @@ func (t *TextView) SetText(s string) {
 	if len(t.lines) == 0 {
 		t.lines = []string{""}
 	}
-	t.curLine, t.curCol, t.top = 0, 0, 0
+	t.curLine, t.curCol, t.top, t.leftPx = 0, 0, 0, 0
 	t.collapseSelection() // a fresh buffer has no selection
+	t.undo, t.redo = nil, nil
 	t.changed()
 	t.scrolled()
 	_ = t.Draw()
@@ -147,6 +160,9 @@ func (t *TextView) expand(line string, n int) string {
 	}
 	return b.String()
 }
+
+// originX is the on-screen x of column 0 (left margin minus horizontal scroll).
+func (t *TextView) originX() int { return 2 - t.leftPx }
 
 // colX is the pixel x (from the text origin) of rune column col on line.
 func (t *TextView) colX(line string, col int) int {
@@ -204,6 +220,9 @@ func (t *TextView) ScrollTo(line int) {
 
 // Draw repaints the visible lines and the caret.
 func (t *TextView) Draw() error {
+	if t.gc == nil {
+		return nil // not realised yet (e.g. offline unit tests)
+	}
 	if err := t.ClearArea(0, 0, 0, 0, false); err != nil {
 		return err
 	}
@@ -215,15 +234,16 @@ func (t *TextView) Draw() error {
 			break
 		}
 		y := base.INT16(i * h)
+		ox := t.originX()
 		if s0, s1, ok := t.selSpan(ln); ok {
-			x0 := 2 + t.colX(t.lines[ln], s0)
-			x1 := 2 + t.colX(t.lines[ln], s1)
+			x0 := ox + t.colX(t.lines[ln], s0)
+			x1 := ox + t.colX(t.lines[ln], s1)
 			if err := t.FillRect(t.selGc.XID, base.INT16(x0), y, base.CARD16(x1-x0), base.CARD16(h)); err != nil {
 				return err
 			}
 		}
 		if t.lines[ln] != "" {
-			if err := t.Font.DrawText(t.Drawable, t.gc.XID, 2, y, 0, t.expand(t.lines[ln], -1)); err != nil {
+			if err := t.Font.DrawText(t.Drawable, t.gc.XID, base.INT16(ox), y, 0, t.expand(t.lines[ln], -1)); err != nil {
 				return err
 			}
 		}
@@ -263,7 +283,7 @@ func (t *TextView) drawCaret() error {
 	if row < 0 || row >= t.VisibleLines() {
 		return nil
 	}
-	x := 2 + t.colX(t.lines[t.curLine], t.curCol)
+	x := t.originX() + t.colX(t.lines[t.curLine], t.curCol)
 	y := row * t.Font.Height()
 	return t.FillRect(t.gc.XID, base.INT16(x), base.INT16(y), 1, base.CARD16(t.Font.Height()))
 }
@@ -334,7 +354,7 @@ func (t *TextView) placeCursor(x, y int) {
 		row = len(t.lines) - 1
 	}
 	t.curLine = row
-	t.curCol = t.colAtX(t.lines[row], x-2)
+	t.curCol = t.colAtX(t.lines[row], x-t.originX())
 }
 
 // edit applies one decoded key event to the buffer/cursor and reports whether a
@@ -342,23 +362,41 @@ func (t *TextView) placeCursor(x, y int) {
 // server.
 func (t *TextView) edit(k keyboard.Event) bool {
 	hadSel := t.hasSelection()
+	nav := false // a pure cursor move (Shift extends, otherwise collapses)
+	mutating := keyMutates(k)
+	var pushed bool
+	if mutating {
+		pushed = t.beginEdit()
+	}
+
 	switch k.Key {
 	case keyboard.KeyLeft:
 		t.moveLeft()
+		nav = true
 	case keyboard.KeyRight:
 		t.moveRight()
+		nav = true
 	case keyboard.KeyUp:
 		t.moveVert(-1)
+		nav = true
 	case keyboard.KeyDown:
 		t.moveVert(1)
+		nav = true
 	case keyboard.KeyHome:
 		t.curCol = 0
+		nav = true
 	case keyboard.KeyEnd:
 		t.curCol = t.runeLen(t.curLine)
+		nav = true
 	case keyboard.KeyPageUp:
 		t.moveVert(-t.VisibleLines())
+		nav = true
 	case keyboard.KeyPageDown:
 		t.moveVert(t.VisibleLines())
+		nav = true
+	case keyboard.KeyTab:
+		t.replaceSelection()
+		t.insertRune('\t')
 	case keyboard.KeyEnter:
 		t.replaceSelection()
 		t.insertNewline()
@@ -379,14 +417,42 @@ func (t *TextView) edit(k keyboard.Event) bool {
 			t.replaceSelection()
 			t.insertRune(k.Rune)
 		} else {
+			t.endEdit(pushed)
 			return false // modifier-only or unhandled key: no repaint
 		}
 	default:
+		t.endEdit(pushed)
 		return false
 	}
-	t.collapseSelection() // keyboard navigation/editing collapses the selection
+
+	// Shift+navigation extends the selection; everything else collapses it.
+	if !nav || !k.Shift {
+		t.collapseSelection()
+	}
+	t.endEdit(pushed)
 	t.ensureVisible()
 	return true
+}
+
+// keyMutates reports whether a key changes the buffer (and so needs an undo
+// snapshot).
+func keyMutates(k keyboard.Event) bool {
+	switch k.Key {
+	case keyboard.KeyTab, keyboard.KeyEnter, keyboard.KeyBackspace, keyboard.KeyDelete:
+		return true
+	case keyboard.KeyNone:
+		return k.Printable()
+	}
+	return false
+}
+
+// SelectAll selects the whole buffer.
+func (t *TextView) SelectAll() {
+	t.anchorLine, t.anchorCol = 0, 0
+	t.curLine = len(t.lines) - 1
+	t.curCol = t.runeLen(t.curLine)
+	t.ensureVisible()
+	_ = t.Draw()
 }
 
 // replaceSelection deletes the selection (if any) before an insert.
@@ -440,6 +506,8 @@ func (t *TextView) DeleteSelection() {
 	if t.ReadOnly || !t.hasSelection() {
 		return
 	}
+	pushed := t.beginEdit()
+	defer t.endEdit(pushed)
 	l0, c0, l1, c1 := t.selRange()
 	head := string([]rune(t.lines[l0])[:c0])
 	tail := string([]rune(t.lines[l1])[c1:])
@@ -457,6 +525,8 @@ func (t *TextView) Insert(s string) {
 	if t.ReadOnly {
 		return
 	}
+	pushed := t.beginEdit()
+	defer t.endEdit(pushed)
 	if t.hasSelection() {
 		t.DeleteSelection()
 	}
@@ -469,6 +539,84 @@ func (t *TextView) Insert(s string) {
 	}
 	t.collapseSelection()
 	t.ensureVisible()
+}
+
+// --- search & replace ---
+
+// FindNext selects the next occurrence of query at or after the cursor and
+// scrolls to it; the search wraps around the buffer. Returns false if there is
+// no match (or query is empty).
+func (t *TextView) FindNext(query string) bool {
+	l, c, ok := searchFrom(t.lines, query, t.curLine, t.curCol+1)
+	if !ok {
+		return false
+	}
+	t.anchorLine, t.anchorCol = l, c
+	t.curLine, t.curCol = l, c+len([]rune(query))
+	t.ensureVisible()
+	_ = t.Draw()
+	return true
+}
+
+// ReplaceAll replaces every occurrence of old with new and returns the count.
+func (t *TextView) ReplaceAll(old, new string) int {
+	if old == "" || t.ReadOnly {
+		return 0
+	}
+	n := 0
+	for _, ln := range t.lines {
+		n += strings.Count(ln, old)
+	}
+	if n == 0 {
+		return 0
+	}
+	pushed := t.beginEdit()
+	defer t.endEdit(pushed)
+	for i := range t.lines {
+		t.lines[i] = strings.ReplaceAll(t.lines[i], old, new)
+	}
+	t.curLine, t.curCol, t.top = 0, 0, 0
+	t.collapseSelection()
+	t.changed()
+	_ = t.Draw()
+	return n
+}
+
+// searchFrom finds query at or after (fromLine, fromCol), wrapping once around
+// the buffer. Positions are rune indices. Matching is within a single line.
+func searchFrom(lines []string, query string, fromLine, fromCol int) (line, col int, ok bool) {
+	if query == "" || len(lines) == 0 {
+		return 0, 0, false
+	}
+	n := len(lines)
+	if fromLine < 0 || fromLine >= n {
+		fromLine = 0
+	}
+	for d := 0; d < n; d++ {
+		li := (fromLine + d) % n
+		rs := []rune(lines[li])
+		from := 0
+		if d == 0 {
+			from = clampInt(fromCol, 0, len(rs))
+		}
+		if idx := runeIndex(string(rs[from:]), query); idx >= 0 {
+			return li, from + idx, true
+		}
+	}
+	// wrap: the head of the starting line (before fromCol) was not searched above
+	if idx := runeIndex(lines[fromLine], query); idx >= 0 {
+		return fromLine, idx, true
+	}
+	return 0, 0, false
+}
+
+// runeIndex returns the rune index of the first occurrence of q in s, or -1.
+func runeIndex(s, q string) int {
+	b := strings.Index(s, q)
+	if b < 0 {
+		return -1
+	}
+	return len([]rune(s[:b]))
 }
 
 // --- editing primitives (operate on rune slices so multibyte is safe) ---
@@ -571,7 +719,7 @@ func (t *TextView) moveVert(d int) {
 	}
 }
 
-// ensureVisible scrolls so the cursor line is on screen.
+// ensureVisible scrolls vertically and horizontally so the cursor is on screen.
 func (t *TextView) ensureVisible() {
 	if t.curLine < t.top {
 		t.top = t.curLine
@@ -579,6 +727,26 @@ func (t *TextView) ensureVisible() {
 	} else if vis := t.VisibleLines(); t.curLine >= t.top+vis {
 		t.top = t.curLine - vis + 1
 		t.scrolled()
+	}
+	t.ensureColVisible()
+}
+
+// ensureColVisible adjusts the horizontal offset so the caret is within the
+// visible width.
+func (t *TextView) ensureColVisible() {
+	caret := t.colX(t.lines[t.curLine], t.curCol)
+	view := int(t.W) - 4 // text area minus the left/right margin
+	if view < 1 {
+		view = 1
+	}
+	const pad = 8 // keep a little context past the caret
+	if caret < t.leftPx {
+		t.leftPx = max0(caret - pad)
+	} else if caret > t.leftPx+view {
+		t.leftPx = caret - view + pad
+	}
+	if t.leftPx < 0 {
+		t.leftPx = 0
 	}
 }
 
@@ -592,6 +760,87 @@ func (t *TextView) scrolled() {
 	if t.OnScroll != nil {
 		t.OnScroll()
 	}
+}
+
+// --- undo / redo ---
+//
+// Each mutating action snapshots the buffer+cursor before changing it. A
+// reentrancy guard (recording) keeps a compound action (e.g. replace selection
+// then insert) to a single undo step.
+
+func (t *TextView) snapshot() tvSnapshot {
+	cp := make([]string, len(t.lines))
+	copy(cp, t.lines)
+	return tvSnapshot{lines: cp, line: t.curLine, col: t.curCol}
+}
+
+// beginEdit takes an undo snapshot unless one was already taken for the current
+// action; it returns true when it was the outermost call.
+func (t *TextView) beginEdit() bool {
+	if t.recording {
+		return false
+	}
+	t.recording = true
+	t.undo = append(t.undo, t.snapshot())
+	if len(t.undo) > undoLimit {
+		t.undo = t.undo[1:]
+	}
+	t.redo = nil
+	return true
+}
+
+func (t *TextView) endEdit(pushed bool) {
+	if pushed {
+		t.recording = false
+	}
+}
+
+func (t *TextView) restore(s tvSnapshot) {
+	t.lines = s.lines
+	if len(t.lines) == 0 {
+		t.lines = []string{""}
+	}
+	t.curLine = clampInt(s.line, 0, len(t.lines)-1)
+	t.curCol = clampInt(s.col, 0, t.runeLen(t.curLine))
+	t.collapseSelection()
+}
+
+// Undo reverts the last edit.
+func (t *TextView) Undo() {
+	if len(t.undo) == 0 {
+		return
+	}
+	t.redo = append(t.redo, t.snapshot())
+	s := t.undo[len(t.undo)-1]
+	t.undo = t.undo[:len(t.undo)-1]
+	t.restore(s)
+	t.changed()
+	t.ensureVisible()
+	_ = t.Draw()
+}
+
+// Redo re-applies the last undone edit.
+func (t *TextView) Redo() {
+	if len(t.redo) == 0 {
+		return
+	}
+	t.undo = append(t.undo, t.snapshot())
+	s := t.redo[len(t.redo)-1]
+	t.redo = t.redo[:len(t.redo)-1]
+	t.restore(s)
+	t.changed()
+	t.ensureVisible()
+	_ = t.Draw()
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func max0(v int) int {
