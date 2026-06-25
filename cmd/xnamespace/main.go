@@ -15,6 +15,9 @@
 //	xnamespace rmtoken  <name> <handle>
 //	xnamespace tokens   <name>
 //
+// Pass the global -json flag to get machine-readable JSON on stdout instead of
+// the human-readable form (errors still go to stderr; check the exit code).
+//
 // Capabilities: mouse shape transparency input keyboard admin all
 //
 // The extension is privileged; against a server that does not offer it (or to
@@ -23,6 +26,7 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -33,8 +37,13 @@ import (
 	"github.com/X11Libre/go-x11proto/proto/ext/namespace"
 )
 
+// jsonOut, set by the global -json flag, switches command output from the
+// human-readable form to machine-readable JSON on stdout.
+var jsonOut bool
+
 func main() {
-	if len(os.Args) < 2 {
+	args := parseGlobalFlags(os.Args[1:])
+	if len(args) < 1 {
 		usage()
 		os.Exit(2)
 	}
@@ -50,17 +59,29 @@ func main() {
 		fatal("%v", err)
 	}
 
-	cmd, args := os.Args[1], os.Args[2:]
+	cmd, args := args[0], args[1:]
 	switch cmd {
 	case "version":
 		maj, min, err := ns.QueryVersion()
 		check(err)
-		fmt.Printf("X-NAMESPACE %d.%d\n", maj, min)
+		if jsonOut {
+			emit(map[string]any{"major": maj, "minor": min})
+		} else {
+			fmt.Printf("X-NAMESPACE %d.%d\n", maj, min)
+		}
 
 	case "list":
 		list, err := ns.ListNamespaces()
 		check(err)
-		printList(list)
+		if jsonOut {
+			out := []jsonInfo{}
+			for _, it := range list {
+				out = append(out, infoJSON(it))
+			}
+			emit(out)
+		} else {
+			printList(list)
+		}
 
 	case "create":
 		if len(args) < 1 {
@@ -68,7 +89,11 @@ func main() {
 		}
 		caps, attrs := parseCapsAndAttrs(args[1:])
 		check(ns.CreateNamespace(args[0], caps, attrs))
-		fmt.Printf("created %q\n", args[0])
+		if jsonOut {
+			emit(map[string]any{"created": args[0]})
+		} else {
+			fmt.Printf("created %q\n", args[0])
+		}
 
 	case "delete":
 		if len(args) < 1 {
@@ -79,7 +104,11 @@ func main() {
 			onClients = namespace.DeleteKillClients
 		}
 		check(ns.DeleteNamespace(args[0], onClients))
-		fmt.Printf("deleted %q\n", args[0])
+		if jsonOut {
+			emit(map[string]any{"deleted": args[0]})
+		} else {
+			fmt.Printf("deleted %q\n", args[0])
+		}
 
 	case "query":
 		if len(args) < 1 {
@@ -87,7 +116,11 @@ func main() {
 		}
 		info, err := ns.QueryNamespace(args[0])
 		check(err)
-		printInfo(info)
+		if jsonOut {
+			emit(infoJSON(info))
+		} else {
+			printInfo(info)
+		}
 
 	case "setflags":
 		if len(args) < 2 {
@@ -96,7 +129,11 @@ func main() {
 		mask, vals := parseFlagDeltas(args[1:])
 		caps, err := ns.SetNamespaceFlags(args[0], mask, vals)
 		check(err)
-		fmt.Printf("capabilities now: %s\n", capString(caps))
+		if jsonOut {
+			emit(map[string]any{"name": args[0], "capabilities": capList(caps)})
+		} else {
+			fmt.Printf("capabilities now: %s\n", capString(caps))
+		}
 
 	case "whoami":
 		var resource base.CARD32
@@ -105,11 +142,15 @@ func main() {
 		}
 		name, isServer, err := ns.GetClientNamespace(resource)
 		check(err)
-		who := "client"
-		if isServer {
-			who = "server"
+		if jsonOut {
+			emit(map[string]any{"namespace": name, "server": isServer})
+		} else {
+			who := "client"
+			if isServer {
+				who = "server"
+			}
+			fmt.Printf("namespace=%q (%s)\n", name, who)
 		}
-		fmt.Printf("namespace=%q (%s)\n", name, who)
 
 	case "addtoken":
 		if len(args) < 3 {
@@ -121,14 +162,22 @@ func main() {
 		}
 		handle, err := ns.AddAuthToken(args[0], args[1], data)
 		check(err)
-		fmt.Printf("token handle: 0x%x\n", handle)
+		if jsonOut {
+			emit(map[string]any{"handle": uint32(handle)})
+		} else {
+			fmt.Printf("token handle: 0x%x\n", handle)
+		}
 
 	case "rmtoken":
 		if len(args) < 2 {
 			fatal("rmtoken needs <name> <handle>")
 		}
 		check(ns.RemoveAuthToken(args[0], base.CARD32(parseUint(args[1]))))
-		fmt.Printf("removed token from %q\n", args[0])
+		if jsonOut {
+			emit(map[string]any{"removed": args[0]})
+		} else {
+			fmt.Printf("removed token from %q\n", args[0])
+		}
 
 	case "tokens":
 		if len(args) < 1 {
@@ -136,11 +185,19 @@ func main() {
 		}
 		toks, err := ns.ListAuthTokens(args[0])
 		check(err)
-		for _, t := range toks {
-			fmt.Printf("  0x%-8x %s\n", t.Handle, t.Proto)
-		}
-		if len(toks) == 0 {
-			fmt.Println("  (no tokens)")
+		if jsonOut {
+			out := []jsonToken{}
+			for _, t := range toks {
+				out = append(out, jsonToken{Handle: uint32(t.Handle), Proto: t.Proto})
+			}
+			emit(out)
+		} else {
+			for _, t := range toks {
+				fmt.Printf("  0x%-8x %s\n", t.Handle, t.Proto)
+			}
+			if len(toks) == 0 {
+				fmt.Println("  (no tokens)")
+			}
 		}
 
 	default:
@@ -197,31 +254,91 @@ func parseFlagDeltas(words []string) (mask, values base.CARD32) {
 	return mask, values
 }
 
-func capString(c base.CARD32) string {
-	if c == 0 {
-		return "(none)"
-	}
-	var parts []string
+// capList returns the set capability bits as stable name strings (never nil, so
+// it marshals to a JSON [] rather than null).
+func capList(c base.CARD32) []string {
+	out := []string{}
 	for _, name := range []string{"mouse", "shape", "transparency", "input", "keyboard", "admin"} {
 		if c&capByName[name] != 0 {
-			parts = append(parts, name)
+			out = append(out, name)
 		}
 	}
-	return strings.Join(parts, ",")
+	return out
+}
+
+// attrList returns the set attribute bits as stable name strings.
+func attrList(a base.CARD32) []string {
+	out := []string{}
+	if a&namespace.AttrImmutable != 0 {
+		out = append(out, "immutable")
+	}
+	if a&namespace.AttrTransient != 0 {
+		out = append(out, "transient")
+	}
+	return out
+}
+
+func capString(c base.CARD32) string {
+	if l := capList(c); len(l) > 0 {
+		return strings.Join(l, ",")
+	}
+	return "(none)"
 }
 
 func attrString(a base.CARD32) string {
-	var parts []string
-	if a&namespace.AttrImmutable != 0 {
-		parts = append(parts, "immutable")
+	if l := attrList(a); len(l) > 0 {
+		return strings.Join(l, ",")
 	}
-	if a&namespace.AttrTransient != 0 {
-		parts = append(parts, "transient")
+	return "(none)"
+}
+
+// --- machine-readable (JSON) output ---
+
+type jsonInfo struct {
+	Name         string   `json:"name"`
+	Capabilities []string `json:"capabilities"`
+	Attributes   []string `json:"attributes"`
+	Clients      uint32   `json:"clients"`
+	Tokens       uint32   `json:"tokens"`
+}
+
+type jsonToken struct {
+	Handle uint32 `json:"handle"`
+	Proto  string `json:"proto"`
+}
+
+func infoJSON(it namespace.Info) jsonInfo {
+	return jsonInfo{
+		Name:         it.Name,
+		Capabilities: capList(it.Capabilities),
+		Attributes:   attrList(it.Attributes),
+		Clients:      uint32(it.Refcnt),
+		Tokens:       uint32(it.NumTokens),
 	}
-	if len(parts) == 0 {
-		return "(none)"
+}
+
+// emit writes v as indented JSON to stdout.
+func emit(v any) {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		fatal("json: %v", err)
 	}
-	return strings.Join(parts, ",")
+	fmt.Println(string(b))
+}
+
+// parseGlobalFlags strips the global -json/--json flag from the argument list,
+// leaving the command and its positional arguments.
+func parseGlobalFlags(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, a := range in {
+		switch a {
+		case "-json", "--json":
+			jsonOut = true
+		default:
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func printList(list []namespace.Info) {
@@ -298,6 +415,9 @@ func usage() {
   addtoken <name> <proto> <hex>    add an auth token
   rmtoken  <name> <handle>         remove an auth token
   tokens   <name>                  list a namespace's auth tokens
+
+options:
+  -json                            emit machine-readable JSON on stdout
 
 capabilities: mouse shape transparency input keyboard admin all
 `)
