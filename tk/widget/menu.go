@@ -346,7 +346,16 @@ func (top *Menu) handleMotion(rx, ry base.INT16) {
 		if top.onBarHover != nil {
 			top.onBarHover(rx, ry)
 		}
-		return // otherwise keep the cascade as-is
+		// drop the hover highlight so a selection doesn't linger once the
+		// pointer leaves, but keep the item that opened a submenu lit so the
+		// path to the open child stays visible.
+		for m := top; m != nil; m = m.child {
+			if m.hi != m.childItem {
+				m.hi = m.childItem
+				m.draw()
+			}
+		}
+		return
 	}
 	i := cur.itemAtRoot(rx, ry)
 	newHi := -1
