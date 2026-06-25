@@ -469,6 +469,11 @@ grip on the left and a **×** close button on the right: **drag** the grip to
 move the window, click the **×** to re-attach (close). Leaf items still run
 their `OnClick`; submenu cascades are not offered while detached.
 
+Rather than flagging each menu, make a whole menu bar detachable at once with
+`bar.TearOff = true` (it applies to every menu it owns), or drive it from the
+desktop: `bar.TearOff = theme.Load(conn).TearOffMenus`, which reflects the
+`Gtk/MenuTearoff` XSETTINGS key.
+
 The detached window is *not* override-redirect (an override-redirect window's
 clicks get swallowed by a window manager's passive button grabs — only motion
 gets through). Instead it is a normal managed window with WM decorations turned
