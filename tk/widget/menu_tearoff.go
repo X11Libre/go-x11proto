@@ -25,7 +25,9 @@ func (m *Menu) tearHandle() bool { return m.TearOff || m.detached }
 func (m *Menu) tearOff() {
 	d := &Menu{Items: m.Items, detached: true}
 	d.Drawable.Conn = m.Conn
-	_ = d.initDetached(m.rx, m.ry)
+	// offset a little so it visibly pops out as its own window rather than
+	// sitting exactly where the popup was (which looks like nothing happened).
+	_ = d.initDetached(m.rx+24, m.ry+24)
 }
 
 // initDetached creates and maps the torn-off window at the given root position.
@@ -66,7 +68,10 @@ func (m *Menu) initDetached(rootX, rootY base.INT16) error {
 	if m.gcHi, err = m.Conn.CreateGC1(white, black, m.font); err != nil {
 		return err
 	}
-	return m.Map()
+	if err := m.Map(); err != nil {
+		return err
+	}
+	return m.Raise() // ensure the torn-off window sits above the main window
 }
 
 // localIndex maps a window-local y to an item index, or tearIndex for the
