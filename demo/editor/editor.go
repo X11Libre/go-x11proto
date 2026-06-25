@@ -111,7 +111,7 @@ func (e *Editor) buildMenu() error {
 	e.menu = &tk_widget.MenuBar{Window: tk_core.Window{
 		Drawable: tk_core.Drawable{Conn: e.tk}, Parent: &e.frame.Window, X: 0, Y: 0, W: winW,
 	}}
-	e.menu.AddMenu("File", []tk_widget.MenuItem{
+	fileMenu := e.menu.AddMenu("File", []tk_widget.MenuItem{
 		{Label: "New", Accel: "Ctrl+N", OnClick: e.newFile},
 		{Label: "Open", Accel: "Ctrl+O", OnClick: e.open},
 		{Label: "Save", Accel: "Ctrl+S", OnClick: e.save},
@@ -119,7 +119,7 @@ func (e *Editor) buildMenu() error {
 		{Separator: true},
 		{Label: "Quit", Accel: "Ctrl+Q", OnClick: e.quit},
 	})
-	e.menu.AddMenu("Edit", []tk_widget.MenuItem{
+	editMenu := e.menu.AddMenu("Edit", []tk_widget.MenuItem{
 		{Label: "Undo", Accel: "Ctrl+Z", OnClick: func() { e.tv.Undo() }},
 		{Label: "Redo", Accel: "Ctrl+Y", OnClick: func() { e.tv.Redo() }},
 		{Separator: true},
@@ -132,6 +132,8 @@ func (e *Editor) buildMenu() error {
 		{Label: "Find Next", Accel: "Ctrl+G", OnClick: e.findNext},
 		{Label: "Replace All", Accel: "Ctrl+R", OnClick: e.replaceAll},
 	})
+	fileMenu.TearOff = true // both menus are detachable (drag the dashed handle)
+	editMenu.TearOff = true
 	return e.menu.Init()
 }
 
