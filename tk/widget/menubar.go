@@ -25,6 +25,13 @@ type barEntry struct {
 // fixed (menuBarHeight).
 type MenuBar struct {
 	tk_core.Window
+
+	// TearOff makes every menu on the bar detachable (a dashed handle at the
+	// top; click it to tear off a persistent copy). Set it before Init — e.g.
+	// from the desktop theme: bar.TearOff = theme.Load(conn).TearOffMenus.
+	// Individual menus can still opt in on their own via Menu.TearOff.
+	TearOff bool
+
 	gc      *tk_core.GC
 	font    base.FONT
 	entries []*barEntry
@@ -74,6 +81,9 @@ func (b *MenuBar) Init() error {
 		en.x1 = x + w + 4
 		x = en.x1 + menuBarPadX
 		en.menu.Drawable.Conn = b.Conn
+		if b.TearOff {
+			en.menu.TearOff = true // bar-wide: make every menu detachable
+		}
 		if err := en.menu.Init(); err != nil {
 			return err
 		}

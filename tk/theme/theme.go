@@ -24,10 +24,11 @@ const (
 
 // Theme is the resolved desktop theming relevant to text sizing.
 type Theme struct {
-	DPI       float64 // Xft/DPI (dots per inch)
-	FontName  string  // raw Gtk/FontName, e.g. "Sans 10"
-	Family    string  // parsed family, e.g. "Sans"
-	PointSize float64 // parsed point size, e.g. 10
+	DPI          float64 // Xft/DPI (dots per inch)
+	FontName     string  // raw Gtk/FontName, e.g. "Sans 10"
+	Family       string  // parsed family, e.g. "Sans"
+	PointSize    float64 // parsed point size, e.g. 10
+	TearOffMenus bool    // Gtk/MenuTearoff: menus are detachable
 }
 
 // Load reads the theme from XSETTINGS for screen 0, falling back to the defaults
@@ -48,6 +49,9 @@ func Load(conn *core.X11Conn) *Theme {
 	if fn, ok := s.FontName(); ok && fn != "" {
 		t.FontName = fn
 		t.Family, t.PointSize = parseFontName(fn)
+	}
+	if v, ok := s.Int(xsettings.KeyMenuTearoff); ok {
+		t.TearOffMenus = v != 0
 	}
 	return t
 }
@@ -79,8 +83,8 @@ func (t *Theme) OpenFont(conn *core.X11Conn) (base.FONT, error) {
 
 // String summarises the theme for logging.
 func (t *Theme) String() string {
-	return fmt.Sprintf("DPI=%.0f font=%q (%s %.0fpt -> %dpx)",
-		t.DPI, t.FontName, t.Family, t.PointSize, t.FontPixelSize())
+	return fmt.Sprintf("DPI=%.0f font=%q (%s %.0fpt -> %dpx) tearoff=%t",
+		t.DPI, t.FontName, t.Family, t.PointSize, t.FontPixelSize(), t.TearOffMenus)
 }
 
 // parseFontName splits a Pango/Gtk font string ("Sans 10", "DejaVu Sans Bold

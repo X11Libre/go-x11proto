@@ -45,6 +45,9 @@ const (
 	KeyAntialias = "Xft/Antialias" // integer 0/1
 	KeyHinting   = "Xft/Hinting"   // integer 0/1
 	KeyRGBA      = "Xft/RGBA"      // string
+	// KeyMenuTearoff toggles detachable ("tear-off") menus toolkit-wide. Not a
+	// standardised XSETTINGS key; a settings manager may publish it as 0/1.
+	KeyMenuTearoff = "Gtk/MenuTearoff" // integer 0/1
 )
 
 // Settings is a decoded XSETTINGS database.
