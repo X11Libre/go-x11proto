@@ -76,7 +76,7 @@ Legend:
 | Widget | Notes | Status | Test |
 |--------|-------|--------|------|
 | `Label` | single line of text via a pluggable `TextRenderer`; Align left/center/right; optional ParentRelative ("transparent") background | OK | `TestTkLabel`, `TestLabelAlignX` (offline) |
-| `Menu` | override-redirect popup with separators, cascading submenus, accelerators and optional tear-off (detach a persistent copy); single pointer grab drives the cascade | OK | `TestTkMenu`, `TestTkContextMenu` (separators + 3-layer submenus) |
+| `Menu` | override-redirect popup with separators, cascading submenus, accelerators and optional tear-off (detach a persistent, draggable copy with its own title bar + close button); single pointer grab drives the cascade | OK | `TestTkMenu`, `TestTkContextMenu` (separators + 3-layer submenus) |
 | `MenuBar` | horizontal title strip; a press pops up the title's `Menu` below it | OK | `TestTkMenu` |
 | `Button` | bordered push button: centred label (tk/font), inverted while pressed, OnButtonPress | OK | exercised by the simple demo and `dialog.Confirm` (`TestTkConfirm`) |
 | `TextView` | multi-line editable text: caret, insert/delete/nav, Tab (expanded), Shift+nav & mouse selection, undo/redo, find/replace, vertical+horizontal & wheel scroll; OnChange/OnScroll/OnSelect/OnKey hooks | OK | `TestTextView*`, `TestSearchFrom`, `TestReplaceAll`, `TestFindNext` (offline), `TestTkTextView`, `TestTkWheelScroll` (live) |

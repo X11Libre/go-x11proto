@@ -73,6 +73,8 @@ type Menu struct {
 	dragMoved      bool
 	dragRX, dragRY base.INT16 // pointer root position at drag start
 	dragWX, dragWY base.INT16 // window position at drag start
+	closeHot       bool       // detached: pointer is over the close button
+	wmDelete       base.ATOM  // WM_DELETE_WINDOW atom (detached window)
 
 	// onBarHover, when set on the top menu (by a MenuBar), is called with the
 	// pointer's root position while it is outside the whole cascade — letting the
@@ -130,8 +132,8 @@ func (m *Menu) Init() error {
 func (m *Menu) layout() {
 	m.itemY = make([]int, len(m.Items)+1)
 	y, hasSub := 0, false
-	if m.tearHandle() {
-		y = tearRowH // reserve the tear-off / drag handle row at the top
+	if h := m.topRowH(); h > 0 {
+		y = h // reserve the tear-off handle / detached title bar at the top
 	}
 	for i, it := range m.Items {
 		m.itemY[i] = y
@@ -278,7 +280,7 @@ func (m *Menu) itemAtRoot(rx, ry base.INT16) int {
 		return -1
 	}
 	yy := int(ry) - int(m.ry)
-	if m.tearHandle() && yy < tearRowH {
+	if h := m.topRowH(); h > 0 && yy < h {
 		return tearIndex
 	}
 	for i := range m.Items {
@@ -295,10 +297,11 @@ func (m *Menu) selectable(i int) bool {
 
 func (m *Menu) draw() {
 	m.ClearArea(0, 0, 0, 0, false)
-	if m.tearHandle() {
-		// a dashed handle across the top (tear-off in a popup, drag/re-attach
-		// title bar in a detached menu); it highlights when hovered so it reads
-		// as clickable.
+	if m.detached {
+		m.drawTitleBar() // framed title bar with a drag grip and a close button
+	} else if m.TearOff {
+		// a dashed tear-off handle across the top; it highlights on hover so it
+		// reads as clickable.
 		dash := m.gc
 		if m.hi == tearIndex {
 			m.FillRect(m.gc.XID, 0, 0, m.W, tearRowH)
@@ -372,14 +375,10 @@ func (top *Menu) handlePress(rx, ry base.INT16) {
 		top.closeAll() // press outside the cascade dismisses it
 		return
 	}
-	idx := cur.itemAtRoot(rx, ry)
-	if idx == tearIndex { // pressing the tear-off handle detaches immediately
-		top.closeAll()
-		cur.tearOff()
-		return
-	}
+	// Note: tearing off happens on *release* over the handle (see handleRelease),
+	// not here — detaching on both press and release would tear off twice.
 	top.pressMenu = cur
-	top.pressIdx = idx
+	top.pressIdx = cur.itemAtRoot(rx, ry)
 }
 
 func (top *Menu) handleRelease(rx, ry base.INT16) {

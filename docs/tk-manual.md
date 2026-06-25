@@ -464,10 +464,17 @@ every hotkey is just the menu's own accelerator, with no duplicated key table.
 
 **Tear-off.** Set `menu.TearOff = true` to draw a dashed handle at the top of
 the menu; clicking it detaches a persistent copy that stays open (like the old
-GTK tear-off menus). The torn-off menu is an override-redirect window with its
-own frame: the dashed handle doubles as a title bar — **drag** it to move the
-window, **click** it (no drag) to re-attach (close). Leaf items still run their
-`OnClick`; submenu cascades are not offered while detached.
+GTK tear-off menus). The torn-off menu draws its own title bar — a dashed drag
+grip on the left and a **×** close button on the right: **drag** the grip to
+move the window, click the **×** to re-attach (close). Leaf items still run
+their `OnClick`; submenu cascades are not offered while detached.
+
+The detached window is *not* override-redirect (an override-redirect window's
+clicks get swallowed by a window manager's passive button grabs — only motion
+gets through). Instead it is a normal managed window with WM decorations turned
+off via `_MOTIF_WM_HINTS`, so the WM still routes our clicks but draws no frame
+of its own; it grabs the input focus on map so the first click isn't eaten by a
+click-to-focus WM.
 
 ### `TextView`
 

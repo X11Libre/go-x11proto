@@ -6,22 +6,31 @@ import (
 	"github.com/X11Libre/go-x11proto/proto/core/events/event_mask"
 	"github.com/X11Libre/go-x11proto/proto/core/request"
 	"github.com/X11Libre/go-x11proto/proto/rpc"
+	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 )
 
 const (
-	tearRowH  = 14 // height of the tear-off / drag handle row
-	tearIndex = -2 // itemAtRoot / localIndex result for the handle row
-	dragSlop  = 3  // movement past which a handle press counts as a drag
+	tearRowH  = 14 // height of the tear-off handle row (popup)
+	titleBarH = 18 // height of the detached menu's title bar
+	tearIndex = -2 // itemAtRoot / localIndex result for the top (handle) row
 )
 
-// tearHandle reports whether the menu shows the dashed handle row: a tear-off
-// popup (TearOff) or a detached copy (where the handle is the title/drag bar).
-func (m *Menu) tearHandle() bool { return m.TearOff || m.detached }
+// topRowH is the height reserved at the top of the menu: the dashed tear-off
+// handle on a TearOff popup, or the title bar on a detached copy.
+func (m *Menu) topRowH() int {
+	switch {
+	case m.detached:
+		return titleBarH
+	case m.TearOff:
+		return tearRowH
+	}
+	return 0
+}
 
-// tearOff detaches a persistent copy of this menu: an override-redirect window
-// with no WM decoration and no pointer grab, carrying its own dashed handle bar.
-// Dragging the bar moves it; a plain click on the bar re-attaches (closes it).
-// Leaf items still run their OnClick; submenu cascades are not offered.
+// tearOff detaches a persistent copy of this menu: a managed but undecorated
+// window with its own title bar (a drag grip plus a close button) and no
+// pointer grab. Drag the grip to move it, click the close button to re-attach
+// (close). Leaf items still run their OnClick; submenu cascades aren't offered.
 func (m *Menu) tearOff() {
 	d := &Menu{Items: m.Items, detached: true}
 	d.Drawable.Conn = m.Conn
@@ -58,9 +67,16 @@ func (m *Menu) initDetached(rootX, rootY base.INT16) error {
 	if err := m.Create(); err != nil {
 		return err
 	}
-	if err := m.SetOverrideRedirect(true); err != nil { // our own frame, no WM
-		return err
+	// A managed window with decorations turned off (via _MOTIF_WM_HINTS): we
+	// draw our own frame, but the window manager still routes button clicks to
+	// us — an override-redirect window's clicks get swallowed by the WM's
+	// passive button grabs (only motion gets through).
+	if motif, err := m.Conn.InternAtom("_MOTIF_WM_HINTS"); err == nil {
+		// flags=DECORATIONS(2), decorations=0 → no title bar / border
+		_ = rpc.ChangeProperty32(m.Conn.X11Conn, 0, m.XID, motif, motif,
+			[]base.CARD32{2, 0, 0, 0, 0})
 	}
+	m.wmDelete, _ = m.Window.EnableWMDelete()
 	var err error
 	if m.gc, err = m.Conn.CreateGC1(black, white, m.font); err != nil {
 		return err
@@ -71,14 +87,47 @@ func (m *Menu) initDetached(rootX, rootY base.INT16) error {
 	if err := m.Map(); err != nil {
 		return err
 	}
-	return m.Raise() // ensure the torn-off window sits above the main window
+	if err := m.Raise(); err != nil { // sit above the main window
+		return err
+	}
+	// Grab the focus right away: under a click-to-focus WM the first click would
+	// otherwise be swallowed to focus the window instead of hitting an item.
+	return rpc.SetInputFocus(m.Conn.X11Conn, 2 /*RevertToParent*/, m.XID, 0)
 }
 
-// localIndex maps a window-local y to an item index, or tearIndex for the
-// handle row (torn-off menus get events in window coordinates, holding no grab
-// except while dragging).
+// drawTitleBar paints the detached menu's title bar: a dark bar with a dashed
+// drag grip on the left and a close (×) button on the right.
+func (m *Menu) drawTitleBar() {
+	w := int(m.W)
+	cx0 := w - titleBarH
+
+	m.FillRect(m.gc.XID, 0, 0, m.W, titleBarH) // dark bar
+	// drag grip: white dashes on the left, up to the close button
+	for x := 5; x < cx0-4; x += 7 {
+		m.FillRect(m.gcHi.XID, base.INT16(x), titleBarH/2-1, 4, 2)
+	}
+	// close button: white box when hovered, then a contrasting ×
+	xgc := m.gcHi
+	if m.closeHot {
+		m.FillRect(m.gcHi.XID, base.INT16(cx0), 0, titleBarH, titleBarH)
+		xgc = m.gc
+	}
+	const pad = 5
+	m.PolySegment(xgc.XID, []base.Segment{
+		{X1: base.INT16(cx0 + pad), Y1: pad, X2: base.INT16(w - pad), Y2: titleBarH - pad},
+		{X1: base.INT16(w - pad), Y1: pad, X2: base.INT16(cx0 + pad), Y2: titleBarH - pad},
+	})
+}
+
+// inCloseButton reports whether window-local (x, y) is over the close button.
+func (m *Menu) inCloseButton(x, y int) bool {
+	return y >= 0 && y < titleBarH && x >= int(m.W)-titleBarH
+}
+
+// localIndex maps a window-local y to an item index, or tearIndex for the top
+// row (torn-off menus get events in window coordinates, except while dragging).
 func (m *Menu) localIndex(y int) int {
-	if m.tearHandle() && y < tearRowH {
+	if h := m.topRowH(); h > 0 && y < h {
 		return tearIndex
 	}
 	for i := range m.Items {
@@ -94,15 +143,26 @@ func (m *Menu) handleDetached(ev events.Event) bool {
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		m.draw()
+	case *events.ClientMessageEvent:
+		if tk_core.IsWMDelete(e, m.wmDelete) { // WM close button, if WM ignored our hints
+			_ = m.Destroy()
+		}
 	case *events.ButtonPressEvent:
-		if e.Key == 1 && m.localIndex(int(e.EventY)) == tearIndex {
+		if e.Key != 1 {
+			break
+		}
+		x, y := int(e.EventX), int(e.EventY)
+		switch {
+		case m.inCloseButton(x, y):
+			_ = m.Destroy() // close (re-attach)
+		case y < titleBarH:
 			m.startDrag(base.INT16(e.RootX), base.INT16(e.RootY))
 		}
 	case *events.MotionEvent:
 		if m.dragging {
 			m.dragTo(base.INT16(e.RootX), base.INT16(e.RootY))
 		} else {
-			m.hover(int(e.EventY))
+			m.hoverDetached(int(e.EventX), int(e.EventY))
 		}
 	case *events.ButtonReleaseEvent:
 		if m.dragging {
@@ -116,25 +176,25 @@ func (m *Menu) handleDetached(ev events.Event) bool {
 	return true
 }
 
-func (m *Menu) hover(y int) {
+// hoverDetached updates the highlighted item and the close-button hover state.
+func (m *Menu) hoverDetached(x, y int) {
+	hot := m.inCloseButton(x, y)
 	nh := -1
-	if i := m.localIndex(y); m.selectable(i) {
-		nh = i
-	} else if i == tearIndex {
-		nh = tearIndex // highlight the drag/re-attach handle
+	if !hot {
+		if i := m.localIndex(y); m.selectable(i) {
+			nh = i
+		}
 	}
-	if m.hi != nh {
-		m.hi = nh
+	if nh != m.hi || hot != m.closeHot {
+		m.hi, m.closeHot = nh, hot
 		m.draw()
 	}
 }
 
-// startDrag grabs the pointer and records the drag origin (a press on the
-// handle bar). It resolves to a move or, if the pointer barely moves, a
-// re-attach on release.
+// startDrag grabs the pointer and records the drag origin (a press on the title
+// bar), so dragging moves the window even when the pointer leaves it.
 func (m *Menu) startDrag(rx, ry base.INT16) {
 	m.dragging = true
-	m.dragMoved = false
 	m.dragRX, m.dragRY = rx, ry
 	m.dragWX, m.dragWY = m.X, m.Y
 	_, _ = rpc.GrabPointer(m.Conn.X11Conn, &request.GrabPointerRequest{
@@ -147,26 +207,12 @@ func (m *Menu) startDrag(rx, ry base.INT16) {
 }
 
 func (m *Menu) dragTo(rx, ry base.INT16) {
-	dx, dy := int(rx)-int(m.dragRX), int(ry)-int(m.dragRY)
-	if abs(dx)+abs(dy) > dragSlop {
-		m.dragMoved = true
-	}
-	m.X = m.dragWX + base.INT16(dx)
-	m.Y = m.dragWY + base.INT16(dy)
+	m.X = m.dragWX + (rx - m.dragRX)
+	m.Y = m.dragWY + (ry - m.dragRY)
 	_ = m.Move(m.X, m.Y)
 }
 
 func (m *Menu) endDrag() {
 	m.dragging = false
 	_ = rpc.UngrabPointer(m.Conn.X11Conn, 0)
-	if !m.dragMoved { // a click on the handle (no drag) re-attaches: close it
-		_ = m.Destroy()
-	}
-}
-
-func abs(v int) int {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
