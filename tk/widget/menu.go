@@ -378,9 +378,18 @@ func (top *Menu) handleRelease(rx, ry base.INT16) {
 	pressMenu, pressIdx := top.pressMenu, top.pressIdx
 	top.pressMenu, top.pressIdx = nil, -1
 
+	// releasing over the tear-off handle detaches, so the classic
+	// press-on-title, drag-to-handle, release gesture works too (its opening
+	// press landed on the bar, not the menu, so it isn't press-tracked).
+	if cur != nil && cur.itemAtRoot(rx, ry) == tearIndex {
+		top.closeAll()
+		cur.tearOff()
+		return
+	}
+
 	// select only on a full click on the same leaf item; ignore the release of
 	// the click that opened the menu (its press was outside the grab) so the
-	// menu stays open until an item is actually clicked.
+	// menu stays up until an item is actually clicked.
 	if cur == nil || cur != pressMenu {
 		return
 	}
