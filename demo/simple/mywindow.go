@@ -70,20 +70,21 @@ func (w *MyWindow) Init() {
 	errPanic(err, "MyWindow => CreateGC1()")
 	w.Gc_black = gcid
 
-	// popup menu bar across the top
+	// popup menu bar across the top; all menus are detachable when the desktop
+	// theme asks for tear-off menus (Gtk/MenuTearoff), forced on here for the demo.
 	w.Menu = tk_widget.MenuBar{
 		Window: tk_core.Window{
 			Drawable: tk_core.Drawable{Conn: w.Window.Conn},
 			Parent:   &w.Window,
 			X:        0, Y: 0, W: 500,
 		},
+		TearOff: true, // or: w.Theme.TearOffMenus
 	}
-	fileMenu := w.Menu.AddMenu("File", []tk_widget.MenuItem{
+	w.Menu.AddMenu("File", []tk_widget.MenuItem{
 		{Label: "Open", OnClick: func() { log.Printf("menu: File / Open\n") }},
 		{Label: "Save", OnClick: func() { log.Printf("menu: File / Save\n") }},
 		{Label: "Quit", OnClick: func() { log.Printf("menu: File / Quit\n"); os.Exit(0) }},
 	})
-	fileMenu.TearOff = true // detachable: click the dashed handle at the top
 	w.Menu.AddMenu("Edit", []tk_widget.MenuItem{
 		{Label: "Cut", OnClick: func() { log.Printf("menu: Edit / Cut\n") }},
 		{Label: "Copy", OnClick: func() { log.Printf("menu: Edit / Copy\n") }},
