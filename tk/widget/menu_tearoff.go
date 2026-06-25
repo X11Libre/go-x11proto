@@ -76,6 +76,19 @@ func (m *Menu) initDetached(rootX, rootY base.INT16) error {
 		_ = rpc.ChangeProperty32(m.Conn.X11Conn, 0, m.XID, motif, motif,
 			[]base.CARD32{2, 0, 0, 0, 0})
 	}
+	// WM_NORMAL_HINTS with USPosition: tell the WM to honour our requested
+	// position instead of running its own placement (which would drop the menu
+	// in the middle of the screen, leaving our m.X/m.Y out of sync so the first
+	// drag step snaps it back).
+	if nh, err := m.Conn.InternAtom("WM_NORMAL_HINTS"); err == nil {
+		sz, _ := m.Conn.InternAtom("WM_SIZE_HINTS")
+		_ = rpc.ChangeProperty32(m.Conn.X11Conn, 0, m.XID, nh, sz, []base.CARD32{
+			1, // flags: USPosition
+			base.CARD32(rootX), base.CARD32(rootY), // x, y (obsolete, for old WMs)
+			base.CARD32(m.W), base.CARD32(m.H), // width, height (obsolete)
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // min/max/inc/aspect/base/gravity
+		})
+	}
 	m.wmDelete, _ = m.Window.EnableWMDelete()
 	var err error
 	if m.gc, err = m.Conn.CreateGC1(black, white, m.font); err != nil {
