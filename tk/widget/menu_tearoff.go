@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	tearRowH  = 10 // height of the tear-off / drag handle row
+	tearRowH  = 14 // height of the tear-off / drag handle row
 	tearIndex = -2 // itemAtRoot / localIndex result for the handle row
 	dragSlop  = 3  // movement past which a handle press counts as a drag
 )
@@ -115,6 +115,8 @@ func (m *Menu) hover(y int) {
 	nh := -1
 	if i := m.localIndex(y); m.selectable(i) {
 		nh = i
+	} else if i == tearIndex {
+		nh = tearIndex // highlight the drag/re-attach handle
 	}
 	if m.hi != nh {
 		m.hi = nh

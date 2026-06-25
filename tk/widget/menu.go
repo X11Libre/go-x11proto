@@ -297,9 +297,16 @@ func (m *Menu) draw() {
 	m.ClearArea(0, 0, 0, 0, false)
 	if m.tearHandle() {
 		// a dashed handle across the top (tear-off in a popup, drag/re-attach
-		// title bar in a detached menu)
-		for x := 5; x < int(m.W)-4; x += 6 {
-			m.FillRect(m.gc.XID, base.INT16(x), tearRowH/2, 3, 1)
+		// title bar in a detached menu); it highlights when hovered so it reads
+		// as clickable.
+		dash := m.gc
+		if m.hi == tearIndex {
+			m.FillRect(m.gc.XID, 0, 0, m.W, tearRowH)
+			dash = m.gcHi
+		}
+		y := base.INT16(tearRowH/2 - 1)
+		for x := 4; x < int(m.W)-3; x += 7 {
+			m.FillRect(dash.XID, base.INT16(x), y, 4, 2)
 		}
 	}
 	for i, it := range m.Items {
@@ -342,6 +349,8 @@ func (top *Menu) handleMotion(rx, ry base.INT16) {
 	newHi := -1
 	if cur.selectable(i) {
 		newHi = i
+	} else if i == tearIndex {
+		newHi = tearIndex // highlight the tear-off handle on hover
 	}
 	if cur.hi != newHi {
 		cur.hi = newHi
