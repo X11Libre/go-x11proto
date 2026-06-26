@@ -83,7 +83,7 @@ func (m *Menu) initDetached(rootX, rootY base.INT16) error {
 	if nh, err := m.Conn.InternAtom("WM_NORMAL_HINTS"); err == nil {
 		sz, _ := m.Conn.InternAtom("WM_SIZE_HINTS")
 		_ = rpc.ChangeProperty32(m.Conn.X11Conn, 0, m.XID, nh, sz, []base.CARD32{
-			1, // flags: USPosition
+			1,                                      // flags: USPosition
 			base.CARD32(rootX), base.CARD32(rootY), // x, y (obsolete, for old WMs)
 			base.CARD32(m.W), base.CARD32(m.H), // width, height (obsolete)
 			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // min/max/inc/aspect/base/gravity
