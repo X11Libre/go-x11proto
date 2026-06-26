@@ -164,6 +164,17 @@ func (c *X11Conn) handshake() error {
 }
 
 func (c *X11Conn) readLoop() {
+	// readLoop is the sole sender on eventCh/errorCh, so it is also their sole
+	// closer: closing them here (after the loop returns) guarantees no send can
+	// overlap the close. An external Close() unblocks the io.ReadFull below via
+	// c.conn.Close(), so the loop returns and this runs exactly once. readLoop
+	// is started at the end of a successful handshake, so any usable connection
+	// always has it running to eventually close the channels.
+	defer func() {
+		close(c.eventCh)
+		close(c.errorCh)
+	}()
+
 	header := make([]byte, 32)
 
 	for {
@@ -254,8 +265,11 @@ func (c *X11Conn) closeWithError(err error) {
 	}
 	c.pending = nil
 	c.pendingMu.Unlock()
-	close(c.eventCh)
-	close(c.errorCh)
+	// eventCh/errorCh are NOT closed here: closeWithError can run on a caller's
+	// goroutine (via Close()) while readLoop is mid-send on eventCh, which would
+	// panic with "send on closed channel". Closing c.conn above unblocks
+	// readLoop's io.ReadFull; readLoop is the sole sender and closes the
+	// channels itself once it has returned (see readLoop's defer).
 }
 
 func (c *X11Conn) Send(req base.Request) (base.CARD16, error) {
