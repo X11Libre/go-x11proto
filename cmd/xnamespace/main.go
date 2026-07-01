@@ -24,6 +24,19 @@
 //
 // Capabilities: mouse shape transparency input keyboard admin all
 //
+// Examples:
+//
+//	# create a namespace with two capabilities
+//	xnamespace create sandbox mouse keyboard
+//
+//	# add a MIT-MAGIC-COOKIE-1 token and capture its handle in a script
+//	h=$(xnamespace -s addtoken sandbox MIT-MAGIC-COOKIE-1 00112233445566778899aabbccddeeff)
+//
+//	xnamespace -s whoami          # -> "sandbox\tclient"
+//	xnamespace -s list            # one ns per line: name<TAB>caps<TAB>attrs<TAB>clients<TAB>tokens
+//	xnamespace -s query sandbox   # one "key\tvalue" line per field
+//	xnamespace delete sandbox kill
+//
 // The extension is privileged; against a server that does not offer it (or to
 // an unprivileged client) Query fails with "extension not available".
 package main

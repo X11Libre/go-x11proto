@@ -1,0 +1,132 @@
+.TH XNAMESPACE 1 "2026-07-01" "go-x11proto" "User Commands"
+.SH NAME
+xnamespace \- manage server-side X\-NAMESPACE namespaces and their auth tokens
+.SH SYNOPSIS
+.B xnamespace
+.RB [ \-s | \-\-short | \-json ]
+.I command
+.RI [ args ...]
+.SH DESCRIPTION
+.B xnamespace
+is a command\-line client for the X\-NAMESPACE X server extension. It lists,
+creates, queries and deletes server\-side namespaces and manages their
+authentication tokens.
+.PP
+The extension is privileged: against a server that does not offer it, or from an
+unprivileged client, the commands fail with
+.RB \(lq "extension not available" \(rq.
+.SH OPTIONS
+By default output is human\-readable. For programmatic callers two machine
+formats are available; errors always go to standard error, so check the exit
+status.
+.TP
+.BR \-s ", " \-\-short
+Terse, TAB\-separated, header\-less output: values only, one record per line.
+Trivially parsed from a shell
+.RB ( $(...) ", " read ", " cut )
+or C
+.RB ( strtok / fscanf ).
+An empty result prints nothing. Takes precedence over
+.BR \-json .
+.TP
+.B \-json
+Structured JSON, for richer consumers.
+.SH COMMANDS
+.TP
+.B version
+Show the extension version.
+.TP
+.B list
+List all namespaces.
+.TP
+.BI "create " "name " [ cap ...]\ [transient]
+Create a namespace with the given capabilities.
+.TP
+.BI "delete " "name " [kill]
+Delete a namespace;
+.B kill
+also terminates its clients.
+.TP
+.BI "query " name
+Show one namespace.
+.TP
+.BI "setflags " "name " <+cap|\-cap>...
+Change capability bits.
+.TP
+.BI "whoami " [resource\-id]
+Show the calling client's (or a resource's) namespace.
+.TP
+.BI "addtoken " "name proto hexdata"
+Add an authentication token; prints the new token handle.
+.TP
+.BI "rmtoken " "name handle"
+Remove an authentication token.
+.TP
+.BI "tokens " name
+List a namespace's authentication tokens. No key material is ever shown.
+.SH "SHORT OUTPUT FORMAT"
+With
+.BR \-s ,
+each command emits TAB\-separated fields, no header, one record per line:
+.PP
+.nf
+.RS
+version    MAJOR.MINOR
+list       name  caps(csv)  attrs(csv)  clients  tokens
+create     name
+delete     name
+query      one "key<TAB>value" line per field
+setflags   caps(csv)
+whoami     name  client|server
+addtoken   0xHANDLE
+rmtoken    name
+tokens     0xHANDLE  proto
+.RE
+.fi
+.SH CAPABILITIES
+.B mouse shape transparency input keyboard admin all
+.SH EXAMPLES
+Create a namespace with two capabilities:
+.PP
+.RS
+.B xnamespace create sandbox mouse keyboard
+.RE
+.PP
+Add a token and capture its handle in a script:
+.PP
+.RS
+.B h=$(xnamespace \-s addtoken sandbox MIT\-MAGIC\-COOKIE\-1 00112233445566778899aabbccddeeff)
+.RE
+.PP
+Report the caller's namespace (prints e.g.
+.RB \(lq "sandbox\etclient" \(rq):
+.PP
+.RS
+.B xnamespace \-s whoami
+.RE
+.PP
+List namespaces, one per line, for a shell loop:
+.PP
+.RS
+.B xnamespace \-s list | while IFS="$(printf '\et')" read \-r name caps attrs clients tokens; do ...; done
+.RE
+.PP
+Tear it down, terminating any clients:
+.PP
+.RS
+.B xnamespace delete sandbox kill
+.RE
+.SH "EXIT STATUS"
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An error (e.g. the extension is unavailable, or a request was rejected).
+.TP
+.B 2
+Usage error (unknown or incomplete command).
+.SH "SEE ALSO"
+.BR Xserver (1)
+.SH AUTHORS
+Part of the go\-x11proto project, https://github.com/X11Libre/go\-x11proto .
