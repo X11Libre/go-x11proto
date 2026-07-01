@@ -15,12 +15,10 @@
 //	xnamespace rmtoken  <name> <handle>
 //	xnamespace tokens   <name>
 //
-// For programmatic use pass a global output flag (errors still go to stderr;
-// check the exit code):
-//
-//	-s, --short   terse, tab-separated, header-less lines — easy to parse from a
-//	              shell or C (e.g. HANDLE=$(xnamespace -s addtoken ns proto hex))
-//	-json         structured JSON, for richer consumers
+// For programmatic use pass -s/--short for terse, tab-separated, header-less
+// output — easy to parse from a shell or C, e.g.
+// HANDLE=$(xnamespace -s addtoken ns proto hex). Errors still go to stderr;
+// check the exit status.
 //
 // Capabilities: mouse shape transparency input keyboard admin all
 //
@@ -43,7 +41,6 @@ package main
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -54,16 +51,11 @@ import (
 	"github.com/X11Libre/go-x11proto/proto/ext/namespace"
 )
 
-// Output mode, set by global flags:
-//   -json    machine-readable JSON (structured, for richer consumers)
-//   -s       terse, tab-separated, header-less lines — trivially parsed from a
-//            shell ($(...), read, cut) or C (fscanf/strtok), for programmatic
-//            callers (e.g. a desktop launching a client into its own namespace)
-// short takes precedence over jsonOut if both are given; default is human text.
-var (
-	jsonOut bool
-	short   bool
-)
+// short, set by the global -s/--short flag, switches command output to a
+// terse, tab-separated, header-less form — trivially parsed from a shell
+// ($(...), read, cut) or C (fscanf/strtok), for programmatic callers (e.g. a
+// desktop launching a client into its own namespace). Default is human text.
+var short bool
 
 func main() {
 	args := parseGlobalFlags(os.Args[1:])
@@ -88,32 +80,22 @@ func main() {
 	case "version":
 		maj, min, err := ns.QueryVersion()
 		check(err)
-		switch {
-		case short:
+		if short {
 			fmt.Printf("%d.%d\n", maj, min)
-		case jsonOut:
-			emit(map[string]any{"major": maj, "minor": min})
-		default:
+		} else {
 			fmt.Printf("X-NAMESPACE %d.%d\n", maj, min)
 		}
 
 	case "list":
 		list, err := ns.ListNamespaces()
 		check(err)
-		switch {
-		case short:
+		if short {
 			for _, it := range list {
 				fmt.Printf("%s\t%s\t%s\t%d\t%d\n", it.Name,
 					csv(capList(it.Capabilities)), csv(attrList(it.Attributes)),
 					it.Refcnt, it.NumTokens)
 			}
-		case jsonOut:
-			out := []jsonInfo{}
-			for _, it := range list {
-				out = append(out, infoJSON(it))
-			}
-			emit(out)
-		default:
+		} else {
 			printList(list)
 		}
 
@@ -123,12 +105,9 @@ func main() {
 		}
 		caps, attrs := parseCapsAndAttrs(args[1:])
 		check(ns.CreateNamespace(args[0], caps, attrs))
-		switch {
-		case short:
+		if short {
 			fmt.Println(args[0])
-		case jsonOut:
-			emit(map[string]any{"created": args[0]})
-		default:
+		} else {
 			fmt.Printf("created %q\n", args[0])
 		}
 
@@ -141,12 +120,9 @@ func main() {
 			onClients = namespace.DeleteKillClients
 		}
 		check(ns.DeleteNamespace(args[0], onClients))
-		switch {
-		case short:
+		if short {
 			fmt.Println(args[0])
-		case jsonOut:
-			emit(map[string]any{"deleted": args[0]})
-		default:
+		} else {
 			fmt.Printf("deleted %q\n", args[0])
 		}
 
@@ -156,16 +132,13 @@ func main() {
 		}
 		info, err := ns.QueryNamespace(args[0])
 		check(err)
-		switch {
-		case short:
+		if short {
 			fmt.Printf("name\t%s\n", info.Name)
 			fmt.Printf("capabilities\t%s\n", csv(capList(info.Capabilities)))
 			fmt.Printf("attributes\t%s\n", csv(attrList(info.Attributes)))
 			fmt.Printf("clients\t%d\n", info.Refcnt)
 			fmt.Printf("tokens\t%d\n", info.NumTokens)
-		case jsonOut:
-			emit(infoJSON(info))
-		default:
+		} else {
 			printInfo(info)
 		}
 
@@ -176,12 +149,9 @@ func main() {
 		mask, vals := parseFlagDeltas(args[1:])
 		caps, err := ns.SetNamespaceFlags(args[0], mask, vals)
 		check(err)
-		switch {
-		case short:
+		if short {
 			fmt.Println(csv(capList(caps)))
-		case jsonOut:
-			emit(map[string]any{"name": args[0], "capabilities": capList(caps)})
-		default:
+		} else {
 			fmt.Printf("capabilities now: %s\n", capString(caps))
 		}
 
@@ -196,12 +166,9 @@ func main() {
 		if isServer {
 			who = "server"
 		}
-		switch {
-		case short:
+		if short {
 			fmt.Printf("%s\t%s\n", name, who)
-		case jsonOut:
-			emit(map[string]any{"namespace": name, "server": isServer})
-		default:
+		} else {
 			fmt.Printf("namespace=%q (%s)\n", name, who)
 		}
 
@@ -215,12 +182,9 @@ func main() {
 		}
 		handle, err := ns.AddAuthToken(args[0], args[1], data)
 		check(err)
-		switch {
-		case short:
+		if short {
 			fmt.Printf("0x%x\n", handle)
-		case jsonOut:
-			emit(map[string]any{"handle": uint32(handle)})
-		default:
+		} else {
 			fmt.Printf("token handle: 0x%x\n", handle)
 		}
 
@@ -229,12 +193,9 @@ func main() {
 			fatal("rmtoken needs <name> <handle>")
 		}
 		check(ns.RemoveAuthToken(args[0], base.CARD32(parseUint(args[1]))))
-		switch {
-		case short:
+		if short {
 			fmt.Println(args[0])
-		case jsonOut:
-			emit(map[string]any{"removed": args[0]})
-		default:
+		} else {
 			fmt.Printf("removed token from %q\n", args[0])
 		}
 
@@ -244,18 +205,11 @@ func main() {
 		}
 		toks, err := ns.ListAuthTokens(args[0])
 		check(err)
-		switch {
-		case short:
+		if short {
 			for _, t := range toks {
 				fmt.Printf("0x%x\t%s\n", t.Handle, t.Proto)
 			}
-		case jsonOut:
-			out := []jsonToken{}
-			for _, t := range toks {
-				out = append(out, jsonToken{Handle: uint32(t.Handle), Proto: t.Proto})
-			}
-			emit(out)
-		default:
+		} else {
 			for _, t := range toks {
 				fmt.Printf("  0x%-8x %s\n", t.Handle, t.Proto)
 			}
@@ -360,48 +314,12 @@ func attrString(a base.CARD32) string {
 // empty (no "(none)" decoration, so scripts get a real empty field).
 func csv(l []string) string { return strings.Join(l, ",") }
 
-// --- machine-readable (JSON) output ---
-
-type jsonInfo struct {
-	Name         string   `json:"name"`
-	Capabilities []string `json:"capabilities"`
-	Attributes   []string `json:"attributes"`
-	Clients      uint32   `json:"clients"`
-	Tokens       uint32   `json:"tokens"`
-}
-
-type jsonToken struct {
-	Handle uint32 `json:"handle"`
-	Proto  string `json:"proto"`
-}
-
-func infoJSON(it namespace.Info) jsonInfo {
-	return jsonInfo{
-		Name:         it.Name,
-		Capabilities: capList(it.Capabilities),
-		Attributes:   attrList(it.Attributes),
-		Clients:      uint32(it.Refcnt),
-		Tokens:       uint32(it.NumTokens),
-	}
-}
-
-// emit writes v as indented JSON to stdout.
-func emit(v any) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		fatal("json: %v", err)
-	}
-	fmt.Println(string(b))
-}
-
-// parseGlobalFlags strips the global -json/--json flag from the argument list,
+// parseGlobalFlags strips the global -s/--short flag from the argument list,
 // leaving the command and its positional arguments.
 func parseGlobalFlags(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, a := range in {
 		switch a {
-		case "-json", "--json":
-			jsonOut = true
 		case "-s", "--short":
 			short = true
 		default:
@@ -489,7 +407,6 @@ func usage() {
 options:
   -s, --short                      terse, tab-separated, header-less output for
                                    scripts / C (values only; empty on no result)
-  -json                            emit machine-readable JSON on stdout
 
 capabilities: mouse shape transparency input keyboard admin all
 
