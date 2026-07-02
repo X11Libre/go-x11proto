@@ -1,0 +1,8 @@
+go-x11proto (0.0.3) unstable; urgency=medium
+
+  * Initial Debian packaging.
+  * Build three binary packages: golang-github-x11libre-go-x11proto-dev
+    (the Go library sources), xnamespace (the X-NAMESPACE client tool) and
+    tetris64 (the demo game). The simple/editor demos are left out for now.
+
+ -- Enrico Weigelt <info@metux.net>  Thu, 25 Jun 2026 18:49:54 +0200

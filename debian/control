@@ -1,0 +1,57 @@
+Source: go-x11proto
+Section: x11
+Priority: optional
+Maintainer: Enrico Weigelt <info@metux.net>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-golang,
+ golang-any (>= 2:1.22~),
+ golang-golang-x-image-dev,
+ golang-golang-x-sys-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/X11Libre/go-x11proto
+Vcs-Git: https://github.com/X11Libre/go-x11proto.git
+Vcs-Browser: https://github.com/X11Libre/go-x11proto
+XS-Go-Import-Path: github.com/X11Libre/go-x11proto
+Rules-Requires-Root: no
+
+Package: golang-github-x11libre-go-x11proto-dev
+Architecture: all
+Depends:
+ ${misc:Depends},
+ golang-golang-x-image-dev,
+Description: pure-Go X11 protocol library and widget toolkit (sources)
+ A pure-Go X11 protocol library (client side), built around goroutines for
+ parallel processing. It offers both xcb-style low-level access and an
+ Xlib-style high-level API, supports little- and big-endian servers, and
+ ships a small widget toolkit (tk): windows, drawing, fonts, keyboard,
+ clipboard, theming, images and the RENDER extension.
+ .
+ This package ships the Go source so other Go programs can build against it.
+
+Package: xnamespace
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+Static-Built-Using: ${misc:Static-Built-Using}
+Description: client tool for the X-NAMESPACE extension
+ A small command-line client for the X-NAMESPACE X11 extension: it lists,
+ creates, queries and deletes server-side namespaces and manages their auth
+ tokens. The extension is privileged; against a server that does not offer it
+ the commands fail with "extension not available".
+ .
+ Supports an optional -json flag for machine-readable output.
+
+Package: tetris64
+Section: games
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+Static-Built-Using: ${misc:Static-Built-Using}
+Description: Tetris game built on the go-x11 widget toolkit
+ A Tetris demo for the pure-Go go-x11 X11 toolkit, with multiple resolutions
+ (FHD/WQHD/UHD4K), colour and mono themes, embedded artwork and an in-game
+ help window. Doubles as a showcase of the toolkit's drawing, image and
+ input handling.

@@ -1,0 +1,32 @@
+#!/usr/bin/make -f
+
+# Build in GOPATH mode: dh-golang lays the package and its build-dependency
+# -dev packages out into a GOPATH, so the build needs no network. The go.mod
+# "go 1.22" directive is irrelevant in this mode.
+export GO111MODULE := off
+
+# Only ship/build the library, the xnamespace tool and the tetris64 game; the
+# simple/editor demos and the xnamespace-test helper are left out for now.
+export DH_GOLANG_EXCLUDES := demo/simple demo/editor demo/fonttest demo/terminal demo/terminal-aa demo/terminal-aa-detach cmd/xnamespace-test
+
+DEB_HOST_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
+GOSRC := obj-$(DEB_HOST_GNU_TYPE)/src/github.com/X11Libre/go-x11proto
+
+%:
+	dh $@ --buildsystem=golang --with=golang
+
+override_dh_auto_configure:
+	dh_auto_configure
+	# dh-golang's build-tree copy only takes .go files, not go:embed data;
+	# the tetris64 binary embeds its artwork/music, so copy that in by hand.
+	cp -a demo/tetris64/assets $(GOSRC)/demo/tetris64/
+
+override_dh_auto_test:
+	# Most of the test suite (xts, the live tk tests) needs a running X server
+	# via $DISPLAY, which a headless build container doesn't have; skip it.
+
+override_dh_auto_install:
+	dh_auto_install
+	# games belong under /usr/games, not /usr/bin
+	mkdir -p debian/tmp/usr/games
+	mv debian/tmp/usr/bin/tetris64 debian/tmp/usr/games/tetris64
