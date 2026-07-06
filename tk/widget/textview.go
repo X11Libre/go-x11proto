@@ -21,6 +21,12 @@ import (
 // loaded automatically if nil. The caller may set Fg/Bg (default black on
 // white) and ReadOnly. OnChange fires after any buffer edit and OnScroll after
 // the top line moves, so a status line or scrollbar can refresh.
+//
+// Highlighter and OnLink are optional and additive: leave both nil for a
+// plain single-font, single-colour editor (the original, cheapest code path
+// is unchanged), or set Highlighter for per-line syntax colouring/bold-italic
+// spans and OnLink to make Span.Link runs clickable. Neither field costs a
+// program anything it doesn't use — see the Highlighter doc comment.
 type TextView struct {
 	tk_core.Window
 	Font     *font.Font
@@ -36,6 +42,13 @@ type TextView struct {
 	// Ctrl+C/V/X to the clipboard).
 	OnSelect func(string)
 	OnKey    func(keyboard.Event) bool
+
+	// Highlighter, if set, styles each visible line (colour, font variant,
+	// clickable runs) — see the Highlighter type. OnLink, if set, is called
+	// with a clicked Span's Link id; returning true marks the click handled,
+	// suppressing the normal place-cursor/begin-selection behaviour for it.
+	Highlighter Highlighter
+	OnLink      func(id string) bool
 
 	SelectionBg base.CARD32 // highlight colour (default light blue)
 	TabWidth    int         // tab stop in columns (default 8)
@@ -218,7 +231,10 @@ func (t *TextView) ScrollTo(line int) {
 	}
 }
 
-// Draw repaints the visible lines and the caret.
+// Draw repaints the visible lines and the caret. With no Highlighter set it
+// draws each line in one call with the widget's own Font/Fg (the original,
+// unchanged fast path); with one set, it styles each line by Span instead —
+// see the Highlighter type.
 func (t *TextView) Draw() error {
 	if t.gc == nil {
 		return nil // not realised yet (e.g. offline unit tests)
@@ -228,6 +244,12 @@ func (t *TextView) Draw() error {
 	}
 	h := t.Font.Height()
 	vis := t.VisibleLines()
+	styled := false
+	// curFont/curFg track what the GC is actually set to, so consecutive spans
+	// (even across lines) only issue a ChangeGC when the style really changes.
+	// They start at the widget's own defaults, which is what Init leaves the GC
+	// in, and what this loop always restores it to below before returning.
+	curFont, curFg := t.Font, t.Fg
 	for i := 0; i < vis; i++ {
 		ln := t.top + i
 		if ln >= len(t.lines) {
@@ -242,13 +264,72 @@ func (t *TextView) Draw() error {
 				return err
 			}
 		}
-		if t.lines[ln] != "" {
-			if err := t.Font.DrawText(t.Drawable, t.gc.XID, base.INT16(ox), y, 0, t.expand(t.lines[ln], -1)); err != nil {
+		line := t.lines[ln]
+		if line == "" {
+			continue
+		}
+		if t.Highlighter == nil {
+			if err := t.Font.DrawText(t.Drawable, t.gc.XID, base.INT16(ox), y, 0, t.expand(line, -1)); err != nil {
+				return err
+			}
+			continue
+		}
+		styled = true
+		spans := normalizeSpans(t.Highlighter(ln, line), len([]rune(line)))
+		for _, sp := range spans {
+			f := sp.Font
+			if f == nil {
+				f = t.Font
+			}
+			fg := sp.Fg
+			if fg == 0 {
+				fg = t.Fg
+			}
+			if f != curFont {
+				if err := f.SetOn(t.gc); err != nil {
+					return err
+				}
+				curFont = f
+			}
+			if fg != curFg {
+				if err := t.gc.SetForeground(fg); err != nil {
+					return err
+				}
+				curFg = fg
+			}
+			x := ox + t.colX(line, sp.Start)
+			seg := t.expandRange(line, sp.Start, sp.End)
+			if err := f.DrawText(t.Drawable, t.gc.XID, base.INT16(x), y, 0, seg); err != nil {
 				return err
 			}
 		}
 	}
+	if styled && (curFont != t.Font || curFg != t.Fg) {
+		// Leave the GC in the widget's own defaults so drawCaret below (and any
+		// plain drawing next frame) isn't left in the last span's style.
+		if err := t.Font.SetOn(t.gc); err != nil {
+			return err
+		}
+		if err := t.gc.SetForeground(t.Fg); err != nil {
+			return err
+		}
+	}
 	return t.drawCaret()
+}
+
+// LinkAt returns the Link id of the Highlighter span at pixel (x, y), if the
+// TextView has a Highlighter and that position falls on a linked run.
+func (t *TextView) LinkAt(x, y int) (string, bool) {
+	if t.Highlighter == nil {
+		return "", false
+	}
+	row := t.top + y/t.Font.Height()
+	if row < 0 || row >= len(t.lines) {
+		return "", false
+	}
+	line := t.lines[row]
+	col := t.colAtX(line, x-t.originX())
+	return spanLinkAt(t.Highlighter(row, line), col)
 }
 
 // selSpan returns the selected rune range [s0,s1) on visible line ln, if any.
@@ -299,7 +380,11 @@ func (t *TextView) HandleWindowEvent(ev events.Event) bool {
 		_ = t.Draw()
 	case *events.ButtonPressEvent:
 		switch e.Key {
-		case 1: // left button: place cursor and begin selecting
+		case 1: // left button: a Span.Link hit, else place cursor and begin selecting
+			if id, ok := t.LinkAt(int(e.EventX), int(e.EventY)); ok && t.OnLink != nil && t.OnLink(id) {
+				t.Focus()
+				break
+			}
 			t.Focus()
 			t.placeCursor(int(e.EventX), int(e.EventY))
 			t.collapseSelection()
