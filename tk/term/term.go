@@ -9,7 +9,9 @@ import (
 	"github.com/X11Libre/go-x11proto/proto/core/events/event_mask"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	"github.com/X11Libre/go-x11proto/tk/font"
+	"github.com/X11Libre/go-x11proto/tk/font/ttf"
 	"github.com/X11Libre/go-x11proto/tk/keyboard"
+	tk_render "github.com/X11Libre/go-x11proto/tk/render"
 )
 
 // Term is a terminal emulator widget: a Grid rendered onto a tk_core.Window,
@@ -18,14 +20,22 @@ import (
 // written straight to the PTY; the shell/application on the other end is the
 // only thing that ever changes what's on screen.
 //
-// Fill in Font (required) and optionally Type (defaults to XTerm256Color),
-// Fg/Bg, BoldFont before Start. Start spawns Shell (defaults to $SHELL, then
-// /bin/sh) and begins reading its output in a background goroutine; that
-// goroutine only mutates the Grid (under Term's own lock) and signals
-// Dirty() — it never touches the X connection. The caller's event loop must
-// therefore select on both conn.Events() and Dirty() and call Draw() on
-// either; RunLoop does exactly that as a drop-in replacement for
-// conn.SimpleEventLoop() for a single-Term program.
+// Fill in Font (required unless AAFace is set) and optionally Type (defaults
+// to XTerm256Color), Fg/Bg, BoldFont before Start. Start spawns Shell
+// (defaults to $SHELL, then /bin/sh) and begins reading its output in a
+// background goroutine; that goroutine only mutates the Grid (under Term's
+// own lock) and signals Dirty() — it never touches the X connection. The
+// caller's event loop must therefore select on both conn.Events() and
+// Dirty() and call Draw() on either; RunLoop does exactly that as a
+// drop-in replacement for conn.SimpleEventLoop() for a single-Term program.
+//
+// Set AAFace (plus AARender, the RENDER handle AAFace composites through) to
+// draw with antialiased TrueType instead of the core bitmap Font — see
+// tk/font/ttf. The two rendering paths are entirely separate in Draw (drawAA
+// vs the original GC-based body): they draw through different primitives
+// (Picture vs GC) with little worth sharing, and keeping them apart means
+// AAFace being nil is exactly the pre-existing behavior, unchanged. Font may
+// be left nil when AAFace is set.
 type Term struct {
 	tk_core.Window
 	Font     *font.Font
@@ -33,6 +43,10 @@ type Term struct {
 	Keymap   *keyboard.Map // loaded lazily on first key press if nil
 	Type     Type
 	Fg, Bg   base.CARD32
+
+	AAFace       *ttf.Face
+	AARender     *tk_render.Render
+	FgRGB, BgRGB [3]byte
 
 	Shell    string
 	ExtraEnv []string
@@ -42,6 +56,7 @@ type Term struct {
 
 	gc       *tk_core.GC
 	resolver pixelResolver
+	aaPic    *tk_render.Picture
 
 	mu     sync.Mutex
 	grid   *Grid
@@ -60,6 +75,9 @@ func (t *Term) Init() error {
 		t.Fg = t.Conn.X11Conn.DefaultBlackPixel()
 		t.Bg = t.Conn.X11Conn.DefaultWhitePixel()
 	}
+	if t.FgRGB == ([3]byte{}) && t.BgRGB == ([3]byte{}) {
+		t.BgRGB = [3]byte{0xff, 0xff, 0xff}
+	}
 	if t.Type.Name == "" {
 		t.Type = XTerm256Color
 	}
@@ -72,11 +90,28 @@ func (t *Term) Init() error {
 		return err
 	}
 
-	gc, err := t.Conn.CreateGC1(t.Fg, t.Bg, t.Font.ID)
-	if err != nil {
-		return err
+	if t.Font != nil {
+		gc, err := t.Conn.CreateGC1(t.Fg, t.Bg, t.Font.ID)
+		if err != nil {
+			return err
+		}
+		t.gc = gc
 	}
-	t.gc = gc
+	if t.AAFace != nil {
+		geom, err := t.Window.GetGeometry()
+		if err != nil {
+			return err
+		}
+		fmtID, err := t.AARender.StandardFormat(geom.Depth, false)
+		if err != nil {
+			return err
+		}
+		pic, err := t.AARender.PictureFor(t.Window.Drawable, fmtID, tk_render.PictureValues{})
+		if err != nil {
+			return err
+		}
+		t.aaPic = pic
+	}
 
 	t.cols, t.rows = t.cellSize()
 	t.grid = NewGrid(t.rows, t.cols)
@@ -98,8 +133,13 @@ func (t *Term) Init() error {
 // cellSize computes the grid dimensions the widget's current pixel size
 // holds, at least 1x1.
 func (t *Term) cellSize() (cols, rows int) {
-	h := t.Font.Height()
-	cols = max1(int(t.W) / t.Font.RuneWidth(' '))
+	var h, cw int
+	if t.AAFace != nil {
+		h, cw = t.AAFace.Height(), t.AAFace.Advance(' ')
+	} else {
+		h, cw = t.Font.Height(), t.Font.RuneWidth(' ')
+	}
+	cols = max1(int(t.W) / cw)
 	rows = max1(int(t.H) / h)
 	return
 }
@@ -207,6 +247,9 @@ func (t *Term) Paste(s string) {
 // from the previous one drawn — the same technique widget.TextView's
 // Highlighter path uses, applied to a 2D grid instead of per-line spans.
 func (t *Term) Draw() error {
+	if t.AAFace != nil {
+		return t.drawAA()
+	}
 	if t.gc == nil {
 		return nil
 	}
@@ -286,6 +329,135 @@ func (t *Term) Draw() error {
 
 func sameStyle(a, b Cell) bool {
 	return a.Fg == b.Fg && a.Bg == b.Bg && a.Attr == b.Attr
+}
+
+// drawAA is Draw's antialiased-TrueType counterpart, used instead of the
+// GC-based body above when AAFace is set. It composites through aaPic (a
+// RENDER Picture over the window) rather than a GC, so it is a separate
+// implementation rather than a shared code path with branches — the two
+// draw through different primitives with little worth factoring out.
+//
+// Unlike the core path, cell text here is real UTF-8 (runesText), not
+// squeezed through encodeCell's Latin-1 degradation: an antialiased font can
+// actually have glyphs beyond Latin-1, so there's no need to approximate.
+func (t *Term) drawAA() error {
+	if t.aaPic == nil {
+		return nil
+	}
+	t.mu.Lock()
+	rows, cols := t.grid.Rows, t.grid.Cols
+	cells := make([][]Cell, rows)
+	for r := range cells {
+		cells[r] = append([]Cell(nil), t.grid.cur[r]...)
+	}
+	curRow, curCol, curVisible := t.grid.CursorRow, t.grid.CursorCol, t.grid.CursorVisible
+	t.mu.Unlock()
+
+	h := t.AAFace.Height()
+	cw := t.AAFace.Advance(' ')
+	ascent := t.AAFace.Ascent()
+
+	if err := t.aaPic.Fill(tk_render.OpSrc, rgbColor(t.BgRGB),
+		[]base.Rectangle{{X: 0, Y: 0, Width: base.CARD16(cols * cw), Height: base.CARD16(rows * h)}}); err != nil {
+		return err
+	}
+
+	for r := 0; r < rows; r++ {
+		row := cells[r]
+		y := r * h
+		c := 0
+		for c < cols {
+			cell := row[c]
+			start := c
+			for c < cols && sameStyle(row[c], cell) {
+				c++
+			}
+			fg, bg := t.styleForAA(cell)
+			x := start * cw
+			width := (c - start) * cw
+			if bg != t.BgRGB {
+				if err := t.aaPic.Fill(tk_render.OpOver, rgbColor(bg),
+					[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y), Width: base.CARD16(width), Height: base.CARD16(h)}}); err != nil {
+					return err
+				}
+			}
+			if _, err := t.AAFace.DrawString(t.aaPic, x, y+ascent, runesText(row[start:c]), fg); err != nil {
+				return err
+			}
+			if cell.Attr&AttrUnderline != 0 {
+				if err := t.aaPic.Fill(tk_render.OpOver, rgbColor(fg),
+					[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y + h - 1), Width: base.CARD16(width), Height: 1}}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	if curVisible {
+		x, y := curCol*cw, curRow*h
+		if err := t.aaPic.Fill(tk_render.OpOver, rgbColor(t.FgRGB),
+			[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y), Width: base.CARD16(cw), Height: base.CARD16(h)}}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// styleForAA is styleFor's RGB counterpart for the AA path: same
+// reverse/bold/conceal resolution, but ending in resolveRGB instead of a
+// pixelResolver (RENDER composites real RGB, not a visual-dependent pixel
+// value, so there's no need for pixelResolver's TrueColor/DirectColor mask
+// math here at all).
+func (t *Term) styleForAA(cell Cell) (fg, bg [3]byte) {
+	fgc, bgc := cell.Fg, cell.Bg
+	if cell.Attr&AttrReverse != 0 {
+		fgc, bgc = bgc, fgc
+	}
+	if cell.Attr&AttrBold != 0 && fgc.Mode == ColorIndexed && fgc.Index < 8 {
+		fgc.Index += 8
+	}
+	if cell.Attr&AttrConceal != 0 {
+		fgc = bgc
+	}
+	return t.resolveRGB(fgc, false), t.resolveRGB(bgc, true)
+}
+
+// resolveRGB is pixelResolver.Pixel's RGB counterpart.
+func (t *Term) resolveRGB(c Color, isBg bool) [3]byte {
+	switch c.Mode {
+	case ColorRGB:
+		return [3]byte{c.R, c.G, c.B}
+	case ColorIndexed:
+		r, g, b := indexedRGB(c.Index)
+		return [3]byte{r, g, b}
+	default: // ColorDefault
+		if isBg {
+			return t.BgRGB
+		}
+		return t.FgRGB
+	}
+}
+
+// rgbColor converts an opaque RGB triplet to a RENDER Color.
+func rgbColor(c [3]byte) tk_render.Color {
+	return tk_render.Color{
+		Red: base.CARD16(c[0]) * 0x101, Green: base.CARD16(c[1]) * 0x101, Blue: base.CARD16(c[2]) * 0x101,
+		Alpha: 0xffff,
+	}
+}
+
+// runesText builds a plain UTF-8 string for a run of cells, unlike cellsText
+// which encodes for the Latin-1 core font — the AA path draws real Unicode.
+func runesText(cells []Cell) string {
+	rs := make([]rune, len(cells))
+	for i, c := range cells {
+		if c.Rune == 0 {
+			rs[i] = ' '
+		} else {
+			rs[i] = c.Rune
+		}
+	}
+	return string(rs)
 }
 
 // cellsText builds the byte string to send to the core font for a run of
