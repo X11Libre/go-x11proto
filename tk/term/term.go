@@ -256,7 +256,12 @@ func (t *Term) Draw() error {
 				curFg = fg
 			}
 			x := base.INT16(start * cw)
-			if err := f.DrawTextBG(t.Drawable, t.gc.XID, x, y+base.INT16(f.Ascent), seg); err != nil {
+			// DrawTextBG already adds f.Ascent internally to convert the
+			// top-left y it expects into the baseline ImageText8 needs — do
+			// not add it again here (that bug drew every row one Ascent too
+			// low, making the cursor block look like it sat a line above
+			// the glyph it belonged to).
+			if err := f.DrawTextBG(t.Drawable, t.gc.XID, x, y, seg); err != nil {
 				return err
 			}
 			if cell.Attr&AttrUnderline != 0 {
@@ -283,16 +288,75 @@ func sameStyle(a, b Cell) bool {
 	return a.Fg == b.Fg && a.Bg == b.Bg && a.Attr == b.Attr
 }
 
+// cellsText builds the byte string to send to the core font for a run of
+// cells. It must NOT UTF-8-encode: ImageText8/PolyText8 send a Go string's
+// bytes verbatim as one 8-bit font character code per byte (see
+// tk/core/drawable.go), so a multi-byte UTF-8 sequence would land as several
+// wrong glyphs across several cells instead of one — corrupting not just
+// that character but every cell after it on the line. Each rune therefore
+// goes through encodeCell, which maps it onto exactly one byte.
 func cellsText(cells []Cell) string {
-	rs := make([]rune, len(cells))
+	b := make([]byte, len(cells))
 	for i, c := range cells {
-		if c.Rune == 0 {
-			rs[i] = ' '
-		} else {
-			rs[i] = c.Rune
-		}
+		b[i] = encodeCell(c.Rune)
 	}
-	return string(rs)
+	return string(b)
+}
+
+// encodeCell returns the single font byte for r. A core bitmap font like
+// "fixed" is Latin-1: runes 0-0xFF map directly onto that byte value (the
+// font's own encoding), so no translation is needed or correct there.
+// Anything above Latin-1 — Unicode box-drawing/symbol runes, whether typed
+// directly by a UTF-8-aware application or produced by decSpecialGraphics —
+// has no glyph in such a font at all, so it degrades to a plain-ASCII
+// look-alike (asciiApprox) instead of corrupting the line.
+func encodeCell(r rune) byte {
+	if r == 0 {
+		return ' '
+	}
+	if r <= 0xFF {
+		return byte(r)
+	}
+	return asciiApprox(r)
+}
+
+// asciiApprox maps a Unicode rune a Latin-1 core font cannot render to a
+// plain-ASCII look-alike — crude, but legible and column-stable, which is
+// what actually matters once real glyphs aren't an option.
+func asciiApprox(r rune) byte {
+	switch r {
+	case '─', '━', '┄', '┅', '┈', '┉', '╌', '╍', '═':
+		return '-'
+	case '│', '┃', '┆', '┇', '┊', '┋', '╎', '╏', '║':
+		return '|'
+	case '┌', '┐', '└', '┘', '┼', '├', '┤', '┬', '┴',
+		'┏', '┓', '┗', '┛', '╋', '┣', '┫', '┳', '┻',
+		'╔', '╗', '╚', '╝', '╬', '╠', '╣', '╦', '╩',
+		'╒', '╓', '╕', '╖', '╘', '╙', '╛', '╜',
+		'╞', '╟', '╡', '╢', '╤', '╥', '╧', '╨', '╪', '╫':
+		return '+'
+	case '◆', '◇':
+		return '*'
+	case '▒', '░', '▓', '█':
+		return '#'
+	case '°':
+		return 'o'
+	case '±':
+		return '~'
+	case '·':
+		return '.'
+	case '≤':
+		return '<'
+	case '≥':
+		return '>'
+	case '≠':
+		return '#'
+	case '£':
+		return 'L'
+	case 'π':
+		return 'p'
+	}
+	return '?'
 }
 
 // styleFor resolves a Cell's font and pixel colours, applying Reverse

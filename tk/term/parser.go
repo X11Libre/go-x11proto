@@ -48,6 +48,17 @@ type Parser struct {
 	// use of stEscape so it can never be confused with a fresh top-level
 	// escape sequence.
 	awaitingST bool
+
+	// charsetSlot remembers which of G0-G3 (the byte after ESC: '(' ')' '*'
+	// '+') is being designated, so stCharset's next byte can be interpreted
+	// correctly. altCharset tracks whether G0 is currently designated as DEC
+	// Special Graphics (ESC ( 0) rather than the default ASCII (ESC ( B) —
+	// the common way ncurses/xterm terminfo entries draw box borders. Only
+	// G0 is tracked: SI/SO (switching which of G0-G3 is active) isn't
+	// implemented, since real terminfo entries almost always designate G0
+	// itself rather than shifting between slots.
+	charsetSlot byte
+	altCharset  bool
 }
 
 type pstate int
@@ -93,7 +104,10 @@ func (p *Parser) step(b byte) {
 			p.awaitingST = true
 		}
 	case stCharset:
-		p.state = stGround // the designator byte itself: consumed, no-op
+		if p.charsetSlot == '(' { // only G0 is tracked, see altCharset's doc comment
+			p.altCharset = b == '0'
+		}
+		p.state = stGround
 	}
 }
 
@@ -104,10 +118,72 @@ func (p *Parser) ground(b byte) {
 	case b < 0x20 || b == 0x7f:
 		p.c0(b)
 	case b < 0x80:
+		if p.altCharset {
+			if r, ok := decSpecialGraphics(b); ok {
+				p.putRune(r)
+				return
+			}
+		}
 		p.putRune(rune(b))
 	default:
 		p.utf8Byte(b)
 	}
+}
+
+// decSpecialGraphics maps a byte to the Unicode rune it represents while G0
+// is designated as the VT100 DEC Special Graphics set (ESC ( 0) — the
+// classic mechanism ncurses/xterm terminfo entries use to draw box borders
+// (smacs=\E(0, rmacs=\E(B). Bytes with no special meaning in this set (most
+// of the GL range) aren't listed here and print as plain ASCII, same as
+// always. The rendering side (see tk/term.asciiApprox) still degrades these
+// to plain-ASCII look-alikes for a Latin-1 core font, but the Grid itself
+// stores the real, correct Unicode character either way.
+func decSpecialGraphics(b byte) (rune, bool) {
+	switch b {
+	case '`':
+		return '◆', true
+	case 'a':
+		return '▒', true
+	case 'f':
+		return '°', true
+	case 'g':
+		return '±', true
+	case 'j':
+		return '┘', true
+	case 'k':
+		return '┐', true
+	case 'l':
+		return '┌', true
+	case 'm':
+		return '└', true
+	case 'n':
+		return '┼', true
+	case 'q':
+		return '─', true
+	case 't':
+		return '├', true
+	case 'u':
+		return '┤', true
+	case 'v':
+		return '┴', true
+	case 'w':
+		return '┬', true
+	case 'x':
+		return '│', true
+	case 'y':
+		return '≤', true
+	case 'z':
+		return '≥', true
+	case '{':
+		return 'π', true
+	case '|':
+		return '≠', true
+	case '}':
+		return '£', true
+	case '~':
+		return '·', true
+	}
+	return 0, false
 }
 
 // utf8Byte accumulates multi-byte UTF-8 sequences across Feed boundaries.
@@ -205,7 +281,8 @@ func (p *Parser) escape(b byte) {
 	case '>':
 		p.Modes.AppKeypad = false
 		p.state = stGround
-	case '(', ')', '*', '+': // G0-G3 charset designation: consume the next byte, no-op
+	case '(', ')', '*', '+': // G0-G3 charset designation
+		p.charsetSlot = b
 		p.state = stCharset
 	default:
 		p.state = stGround
@@ -216,6 +293,7 @@ func (p *Parser) reset() {
 	*p.Grid = *NewGrid(p.Grid.Rows, p.Grid.Cols)
 	p.Modes = ModeState{AutoWrap: true}
 	p.curFg, p.curBg, p.curAttr = Color{}, Color{}, 0
+	p.altCharset, p.charsetSlot = false, 0
 	p.state = stGround
 }
 

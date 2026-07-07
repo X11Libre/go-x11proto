@@ -297,3 +297,37 @@ func TestScrollRegionConstrainsNewline(t *testing.T) {
 		t.Fatalf("row3 = %q, want %q", text(g.cur[3]), "bottom")
 	}
 }
+
+// TestDECSpecialGraphicsBoxDrawing is a regression test for the mc/ncurses
+// rendering bug found 2026-07-06: apps that draw box borders via the classic
+// smacs=\E(0/rmacs=\E(B terminfo mechanism (not raw UTF-8) need G0 tracked
+// so the designated bytes decode to the right box-drawing runes instead of
+// their literal ASCII letters.
+func TestDECSpecialGraphicsBoxDrawing(t *testing.T) {
+	g, p := newParser(1, 10, XTerm256Color)
+	p.Feed([]byte("\x1b(0lqqqk\x1b(Bhi"))
+	got := text(g.cur[0])
+	want := "┌───┐" + "hi" + "   " // lqqqk -> ┌───┐, back to ASCII for "hi"
+	if got != want {
+		t.Fatalf("row0 = %q, want %q", got, want)
+	}
+}
+
+func TestDECSpecialGraphicsOnlyAppliesToG0(t *testing.T) {
+	g, p := newParser(1, 5, XTerm256Color)
+	// Designating G1 (')') as special graphics must not affect G0/plain text.
+	p.Feed([]byte("\x1b)0abc"))
+	if text(g.cur[0])[:3] != "abc" {
+		t.Fatalf("row0 = %q, want plain %q (G1 designation must not alter G0 output)", text(g.cur[0]), "abc")
+	}
+}
+
+func TestResetClearsAltCharset(t *testing.T) {
+	g, p := newParser(1, 5, XTerm256Color)
+	p.Feed([]byte("\x1b(0")) // enable DEC special graphics
+	p.Feed([]byte("\x1bc"))  // RIS: full reset
+	p.Feed([]byte("q"))
+	if g.cur[0][0].Rune != 'q' {
+		t.Fatalf("after RIS, 'q' should print literally, got %q", string(g.cur[0][0].Rune))
+	}
+}
