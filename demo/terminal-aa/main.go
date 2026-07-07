@@ -52,9 +52,18 @@ func main() {
 			Y:        50,
 			W:        800,
 			H:        480,
+			// Matches FgRGB/BgRGB below: without this, the X server paints
+			// its own default (white) background for the window before the
+			// first antialiased Draw() ever runs — a white flash on startup
+			// and on every resize, even with double buffering fixing the
+			// per-keypress repaint flicker.
+			SetBackPixel: true,
+			BackPixel:    conn.DefaultBlackPixel(),
 		},
 		AAFace:   face,
 		AARender: rdr,
+		FgRGB:    [3]byte{0xff, 0xff, 0xff},
+		BgRGB:    [3]byte{0x00, 0x00, 0x00},
 		Type:     term.XTerm256Color,
 		OnTitle: func(s string) {
 			// A real title update would call an X11 SetWMName-equivalent on

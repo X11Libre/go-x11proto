@@ -57,6 +57,18 @@ type Term struct {
 	gc       *tk_core.GC
 	resolver pixelResolver
 	aaPic    *tk_render.Picture
+	aaFmt    tk_render.PICTFORMAT
+	aaDepth  base.CARD8
+
+	// aaBack is an offscreen backbuffer drawAA renders into, blitted onto
+	// aaPic in one shot at the end — without it, every Fill/Composite call
+	// lands directly on the visible window and the partially-drawn frame
+	// (background cleared, glyphs not yet drawn) is visible for a moment,
+	// flickering on every redraw.
+	aaBackPix *tk_core.Pixmap
+	aaBackPic *tk_render.Picture
+	aaBackW   base.CARD16
+	aaBackH   base.CARD16
 
 	mu     sync.Mutex
 	grid   *Grid
@@ -112,6 +124,8 @@ func (t *Term) Init() error {
 			return err
 		}
 		t.aaPic = pic
+		t.aaFmt = fmtID
+		t.aaDepth = geom.Depth
 	}
 
 	t.cols, t.rows = t.cellSize()
@@ -407,10 +421,12 @@ func sameStyle(a, b Cell) bool {
 }
 
 // drawAA is Draw's antialiased-TrueType counterpart, used instead of the
-// GC-based body above when AAFace is set. It composites through aaPic (a
-// RENDER Picture over the window) rather than a GC, so it is a separate
-// implementation rather than a shared code path with branches — the two
-// draw through different primitives with little worth factoring out.
+// GC-based body above when AAFace is set. It composites through aaBackPic (a
+// RENDER Picture over an offscreen pixmap) rather than a GC, so it is a
+// separate implementation rather than a shared code path with branches — the
+// two draw through different primitives with little worth factoring out. The
+// finished frame is blitted onto the real window (aaPic) in one Composite at
+// the end — see ensureAABackBuffer's doc comment for why.
 //
 // Unlike the core path, cell text here is real UTF-8 (runesText), not
 // squeezed through encodeCell's Latin-1 degradation: an antialiased font can
@@ -419,6 +435,11 @@ func (t *Term) drawAA() error {
 	if t.aaPic == nil {
 		return nil
 	}
+	if err := t.ensureAABackBuffer(); err != nil {
+		return err
+	}
+	back := t.aaBackPic
+
 	t.mu.Lock()
 	rows, cols := t.grid.Rows, t.grid.Cols
 	live := make([][]Cell, rows)
@@ -434,8 +455,8 @@ func (t *Term) drawAA() error {
 	cw := t.AAFace.Advance(' ')
 	ascent := t.AAFace.Ascent()
 
-	if err := t.aaPic.Fill(tk_render.OpSrc, rgbColor(t.BgRGB),
-		[]base.Rectangle{{X: 0, Y: 0, Width: base.CARD16(cols * cw), Height: base.CARD16(rows * h)}}); err != nil {
+	if err := back.Fill(tk_render.OpSrc, rgbColor(t.BgRGB),
+		[]base.Rectangle{{X: 0, Y: 0, Width: t.aaBackW, Height: t.aaBackH}}); err != nil {
 		return err
 	}
 
@@ -453,16 +474,16 @@ func (t *Term) drawAA() error {
 			x := start * cw
 			width := (c - start) * cw
 			if bg != t.BgRGB {
-				if err := t.aaPic.Fill(tk_render.OpOver, rgbColor(bg),
+				if err := back.Fill(tk_render.OpOver, rgbColor(bg),
 					[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y), Width: base.CARD16(width), Height: base.CARD16(h)}}); err != nil {
 					return err
 				}
 			}
-			if _, err := t.AAFace.DrawString(t.aaPic, x, y+ascent, runesText(row[start:c]), fg); err != nil {
+			if _, err := t.AAFace.DrawString(back, x, y+ascent, runesText(row[start:c]), fg); err != nil {
 				return err
 			}
 			if cell.Attr&AttrUnderline != 0 {
-				if err := t.aaPic.Fill(tk_render.OpOver, rgbColor(fg),
+				if err := back.Fill(tk_render.OpOver, rgbColor(fg),
 					[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y + h - 1), Width: base.CARD16(width), Height: 1}}); err != nil {
 					return err
 				}
@@ -472,11 +493,42 @@ func (t *Term) drawAA() error {
 
 	if curVisible {
 		x, y := curCol*cw, curRow*h
-		if err := t.aaPic.Fill(tk_render.OpOver, rgbColor(t.FgRGB),
+		if err := back.Fill(tk_render.OpOver, rgbColor(t.FgRGB),
 			[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y), Width: base.CARD16(cw), Height: base.CARD16(h)}}); err != nil {
 			return err
 		}
 	}
+
+	return t.aaPic.Composite(tk_render.OpSrc, back, nil, 0, 0, 0, 0, 0, 0, t.aaBackW, t.aaBackH)
+}
+
+// ensureAABackBuffer (re)creates the offscreen pixmap+picture drawAA renders
+// into when the window's size has changed (or on first use), so drawAA
+// always has a same-size backbuffer to draw a full frame into before a
+// single blit makes it visible — without this, every individual Fill/
+// Composite call in drawAA would land directly on the visible window, and
+// the half-drawn frame (background cleared, glyphs not yet drawn) would be
+// visible for a moment: visible flicker on every redraw, worst on every
+// keypress since each one triggers a full repaint.
+func (t *Term) ensureAABackBuffer() error {
+	w, h := t.W, t.H
+	if t.aaBackPic != nil && t.aaBackW == w && t.aaBackH == h {
+		return nil
+	}
+	if t.aaBackPic != nil {
+		_ = t.aaBackPic.Free()
+		_ = t.aaBackPix.Free()
+	}
+	pix, err := t.Conn.CreatePixmap(t.aaDepth, base.DRAWABLE(t.Conn.X11Conn.DefaultRoot()), w, h)
+	if err != nil {
+		return err
+	}
+	pic, err := t.AARender.PictureFor(pix.Drawable, t.aaFmt, tk_render.PictureValues{})
+	if err != nil {
+		_ = pix.Free()
+		return err
+	}
+	t.aaBackPix, t.aaBackPic, t.aaBackW, t.aaBackH = pix, pic, w, h
 	return nil
 }
 
