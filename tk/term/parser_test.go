@@ -89,6 +89,27 @@ func TestFeedEraseDisplay(t *testing.T) {
 	}
 }
 
+// TestEraseFillsWithCurrentSGRBackground is a regression test for a real
+// mc rendering bug found 2026-07-07: mc paints its top menu bar by setting a
+// background colour via SGR and erasing to the end of the line to fill the
+// rest of the row in it (the standard way full-width status/menu bars are
+// drawn) — Grid.blank's doc comment already promised erasing with "the
+// active SGR background, not always black", but nothing kept
+// Grid.DefaultFg/DefaultBg (what blank() actually reads) in sync with the
+// parser's current SGR colours, so the erased portion silently fell back to
+// the terminal's startup default (black) instead — a black gap after the
+// last character on an otherwise fully-coloured bar.
+func TestEraseFillsWithCurrentSGRBackground(t *testing.T) {
+	g, p := newParser(1, 5, XTerm256Color)
+	p.Feed([]byte("\x1b[44mab\x1b[K")) // blue bg, "ab", erase to end of line
+	want := Color{Mode: ColorIndexed, Index: 4}
+	for c := 0; c < 5; c++ {
+		if g.cur[0][c].Bg != want {
+			t.Errorf("cell %d Bg = %+v, want %+v (active SGR background)", c, g.cur[0][c].Bg, want)
+		}
+	}
+}
+
 func TestSGRBasicColorAndReset(t *testing.T) {
 	g, p := newParser(1, 5, XTerm256Color)
 	p.Feed([]byte("\x1b[31;1mx\x1b[0my"))

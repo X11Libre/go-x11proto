@@ -560,6 +560,14 @@ func (p *Parser) setAltScreen(on bool) {
 // sgr applies CSI ... m (Select Graphic Rendition): text attributes and
 // 8/16/256/truecolor foreground and background, clamped to what the
 // Parser's Type actually supports.
+// sgr applies one SGR (CSI ... m) sequence's parameters to curFg/curBg/
+// curAttr, then mirrors the resulting colours into Grid.DefaultFg/DefaultBg
+// so a subsequent erase (EL/ED) or scroll fills with the now-current SGR
+// background rather than whatever it was at Term startup — real terminals
+// erase with the active background (e.g. a full-width status/menu bar: set
+// a background colour, then erase-to-end-of-line to paint the rest of the
+// row in it), and Grid.blank's doc comment already promised this even
+// though nothing previously kept DefaultBg in sync to make it true.
 func (p *Parser) sgr() {
 	if len(p.params) == 0 {
 		p.params = []int{0}
@@ -621,6 +629,7 @@ func (p *Parser) sgr() {
 			p.curBg = p.clamped(Color{Mode: ColorIndexed, Index: uint8(n - 100 + 8)})
 		}
 	}
+	p.Grid.DefaultFg, p.Grid.DefaultBg = p.curFg, p.curBg
 }
 
 // extendedColor parses the 256-colour (38/48;5;N) or truecolor (38/48;2;R;G;B)
