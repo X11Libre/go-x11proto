@@ -74,3 +74,69 @@ func TestCellsTextDoesNotUTF8Encode(t *testing.T) {
 		t.Fatalf("cellsText = %q, want %q", got, "a-b")
 	}
 }
+
+// scrolledTerm builds a bare Term (no window, no font, no connection —
+// ScrollTo's internal Draw() call no-ops when both AAFace and gc are nil, so
+// this is safe to exercise offline) with rows lines of live content ending
+// in "…D","E" and enough scrollback behind it (oldest first) to test
+// visibleRows' windowing against a known, fully-controlled history.
+func scrolledTerm(rows int) *Term {
+	g := NewGrid(rows, 1)
+	for _, r := range []rune{'A', 'B', 'C', 'D', 'E'} {
+		g.cur[rows-1][0] = Cell{Rune: r}
+		g.ScrollUp(1)
+	}
+	return &Term{grid: g, rows: rows}
+}
+
+func TestVisibleRowsLiveWhenNotScrolled(t *testing.T) {
+	term := scrolledTerm(2)
+	live := term.grid.cur
+	got := term.visibleRows(live)
+	if len(got) != 2 || text(got[0]) != "E" || text(got[1]) != " " {
+		t.Fatalf("visibleRows(offset 0) = %q,%q, want live unchanged (\"E\",\" \")", text(got[0]), text(got[1]))
+	}
+}
+
+func TestVisibleRowsBlendsScrollbackAndLive(t *testing.T) {
+	// scrolledTerm(2) pushed blank,A,B,C,D into scrollback (oldest first)
+	// and left live = ["E", blank].
+	term := scrolledTerm(2)
+	live := term.grid.cur
+
+	term.scrollOffset = 1 // 1 line back: reveal 'D' at top, drop live's blank bottom row
+	got := term.visibleRows(live)
+	if text(got[0]) != "D" || text(got[1]) != "E" {
+		t.Errorf("offset 1 = %q,%q, want \"D\",\"E\"", text(got[0]), text(got[1]))
+	}
+
+	term.scrollOffset = 2 // fully within scrollback: "C","D"
+	got = term.visibleRows(live)
+	if text(got[0]) != "C" || text(got[1]) != "D" {
+		t.Errorf("offset 2 = %q,%q, want \"C\",\"D\"", text(got[0]), text(got[1]))
+	}
+
+	term.scrollOffset = 3 // offset > rows: still entirely within scrollback, one further back
+	got = term.visibleRows(live)
+	if text(got[0]) != "B" || text(got[1]) != "C" {
+		t.Errorf("offset 3 = %q,%q, want \"B\",\"C\"", text(got[0]), text(got[1]))
+	}
+}
+
+func TestScrollToClampsToAvailableHistory(t *testing.T) {
+	term := scrolledTerm(2)
+	max := term.grid.ScrollbackLen()
+
+	term.ScrollTo(-5)
+	if term.scrollOffset != 0 {
+		t.Errorf("ScrollTo(-5): offset = %d, want 0 (clamped)", term.scrollOffset)
+	}
+	term.ScrollTo(max + 100)
+	if term.scrollOffset != max {
+		t.Errorf("ScrollTo(past end): offset = %d, want %d (clamped to available history)", term.scrollOffset, max)
+	}
+	term.ScrollBy(-100)
+	if term.scrollOffset != 0 {
+		t.Errorf("ScrollBy(-100) from max: offset = %d, want 0 (clamped)", term.scrollOffset)
+	}
+}

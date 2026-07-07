@@ -63,8 +63,9 @@ type Term struct {
 	parser *Parser
 	pty    *PTY
 
-	dirty      chan struct{}
-	cols, rows int
+	dirty        chan struct{}
+	cols, rows   int
+	scrollOffset int // lines scrolled back from the live bottom; 0 = live
 }
 
 // Init creates and maps the window and its GC. Call Start afterwards to
@@ -84,7 +85,7 @@ func (t *Term) Init() error {
 	t.dirty = make(chan struct{}, 1)
 	t.resolver = newPixelResolver(t.Conn.X11Conn)
 
-	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.Exposure | event_mask.StructureNotify)
+	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.Exposure | event_mask.StructureNotify | event_mask.ButtonPress)
 	t.Window.SetWindowHandler(t)
 	if err := t.Window.Create(); err != nil {
 		return err
@@ -116,6 +117,12 @@ func (t *Term) Init() error {
 	t.cols, t.rows = t.cellSize()
 	t.grid = NewGrid(t.rows, t.cols)
 	t.grid.DefaultFg, t.grid.DefaultBg = Color{}, Color{}
+	if !t.Type.Scrollback {
+		// Type.Scrollback was previously declared but never actually wired
+		// up: NewGrid always enabled it regardless of profile. A real VT100
+		// had no scrollback at all, so a VT100/VT220 Type should not either.
+		t.grid.scrollbackCap = 0
+	}
 	t.parser = NewParser(t.grid, t.Type)
 	t.parser.Respond = func(b []byte) {
 		if t.pty != nil {
@@ -210,6 +217,70 @@ func (t *Term) markDirty() {
 // event loop must select on it (see RunLoop).
 func (t *Term) Dirty() <-chan struct{} { return t.dirty }
 
+// X11 delivers wheel/touchpad scrolling as button events: buttons 4/5 are
+// vertical up/down (see tk/widget/scroll.go for the same convention).
+const (
+	btnWheelUp   base.CARD8 = 4
+	btnWheelDown base.CARD8 = 5
+)
+
+// wheelStepLines is how many lines one wheel/touchpad notch scrolls.
+const wheelStepLines = 3
+
+// ScrollTo scrolls to offset lines back from the live bottom (0, clamped),
+// redrawing if the (clamped) offset actually changed.
+func (t *Term) ScrollTo(offset int) {
+	if offset < 0 {
+		offset = 0
+	}
+	t.mu.Lock()
+	if max := t.grid.ScrollbackLen(); offset > max {
+		offset = max
+	}
+	changed := offset != t.scrollOffset
+	t.scrollOffset = offset
+	t.mu.Unlock()
+	if changed {
+		_ = t.Draw()
+	}
+}
+
+// ScrollBy scrolls by delta lines: positive scrolls back into history,
+// negative scrolls forward toward the live bottom.
+func (t *Term) ScrollBy(delta int) {
+	t.mu.Lock()
+	cur := t.scrollOffset
+	t.mu.Unlock()
+	t.ScrollTo(cur + delta)
+}
+
+// visibleRows returns exactly t.rows row-slices to render: live unmodified
+// when scrollOffset is 0 (the common case), otherwise a window blending
+// scrollback with the top of live, oldest at the top — mirrors
+// widget.TextView's ScrollTo model, except offset 0 means "at the live
+// bottom" instead of "at the top" (a terminal's natural resting position).
+//
+// The offset is relative to the current live bottom, not a fixed point in
+// history: new output arriving while scrolled back shifts the view along
+// with it, rather than holding on a fixed absolute line. Real terminals
+// usually do the latter; this is simpler and still lets you read back
+// through history, which is the actual ask — pinning to an absolute line
+// across new output is a possible follow-up, not done here.
+func (t *Term) visibleRows(live [][]Cell) [][]Cell {
+	k := t.scrollOffset
+	if k == 0 {
+		return live
+	}
+	sb := t.grid.ScrollbackLines(k)
+	if k >= t.rows {
+		return sb[:t.rows]
+	}
+	window := make([][]Cell, 0, t.rows)
+	window = append(window, sb...)
+	window = append(window, live[:t.rows-k]...)
+	return window
+}
+
 // RunLoop drives conn's event loop and this Term's output together: it is
 // conn.SimpleEventLoop() plus reacting to Dirty(). Suitable when a program
 // has exactly one Term to run for its whole lifetime (the common case: an
@@ -255,11 +326,15 @@ func (t *Term) Draw() error {
 	}
 	t.mu.Lock()
 	rows, cols := t.grid.Rows, t.grid.Cols
-	cells := make([][]Cell, rows)
-	for r := range cells {
-		cells[r] = append([]Cell(nil), t.grid.cur[r]...)
+	live := make([][]Cell, rows)
+	for r := range live {
+		live[r] = append([]Cell(nil), t.grid.cur[r]...)
 	}
-	curRow, curCol, curVisible := t.grid.CursorRow, t.grid.CursorCol, t.grid.CursorVisible
+	curRow, curCol := t.grid.CursorRow, t.grid.CursorCol
+	// The cursor sits at a live grid position, meaningless once a scrolled-
+	// back view is showing history instead — hide it, like real terminals do.
+	curVisible := t.grid.CursorVisible && t.scrollOffset == 0
+	cells := t.visibleRows(live)
 	t.mu.Unlock()
 
 	if err := t.ClearArea(0, 0, 0, 0, false); err != nil {
@@ -346,11 +421,13 @@ func (t *Term) drawAA() error {
 	}
 	t.mu.Lock()
 	rows, cols := t.grid.Rows, t.grid.Cols
-	cells := make([][]Cell, rows)
-	for r := range cells {
-		cells[r] = append([]Cell(nil), t.grid.cur[r]...)
+	live := make([][]Cell, rows)
+	for r := range live {
+		live[r] = append([]Cell(nil), t.grid.cur[r]...)
 	}
-	curRow, curCol, curVisible := t.grid.CursorRow, t.grid.CursorCol, t.grid.CursorVisible
+	curRow, curCol := t.grid.CursorRow, t.grid.CursorCol
+	curVisible := t.grid.CursorVisible && t.scrollOffset == 0
+	cells := t.visibleRows(live)
 	t.mu.Unlock()
 
 	h := t.AAFace.Height()
@@ -565,6 +642,13 @@ func (t *Term) HandleWindowEvent(ev events.Event) bool {
 		t.handleResize()
 	case *events.KeyPressEvent:
 		t.handleKey(e)
+	case *events.ButtonPressEvent:
+		switch e.Key {
+		case btnWheelUp:
+			t.ScrollBy(wheelStepLines)
+		case btnWheelDown:
+			t.ScrollBy(-wheelStepLines)
+		}
 	}
 	return true
 }
@@ -599,5 +683,9 @@ func (t *Term) handleKey(e *events.KeyPressEvent) {
 	b := EncodeKey(k, appCursor)
 	if b != nil && t.pty != nil {
 		_, _ = t.pty.Master.Write(b)
+		// Typing while scrolled back into history snaps back to live output,
+		// same as real terminals — otherwise the input you just sent would
+		// happen off-screen, above the current (stale) view.
+		t.ScrollTo(0)
 	}
 }

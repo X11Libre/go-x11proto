@@ -175,15 +175,17 @@ func (g *Grid) pushScrollback(row []Cell) {
 	}
 }
 
-// ScrollbackLines returns the n most recent scrollback lines, oldest first
-// (for a future "scroll up to view history" UI; the Term widget itself only
-// ever renders the live grid).
+// ScrollbackLines returns the n most recent scrollback lines, oldest first.
+// Used by Term's ScrollTo/ScrollBy to render a scrolled-back view.
 func (g *Grid) ScrollbackLines(n int) [][]Cell {
 	if n > len(g.scrollback) {
 		n = len(g.scrollback)
 	}
 	return g.scrollback[len(g.scrollback)-n:]
 }
+
+// ScrollbackLen returns how many lines are available via ScrollbackLines.
+func (g *Grid) ScrollbackLen() int { return len(g.scrollback) }
 
 // SetScrollRegion sets the DECSTBM scrolling region, 0-based inclusive,
 // clamped to the grid and reset to the whole screen if invalid.
