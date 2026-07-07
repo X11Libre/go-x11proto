@@ -25,6 +25,18 @@ func (tkc *TkConn) CreateGC1(fg, bg base.CARD32, font base.FONT) (*GC, error) {
 	return &GC{Conn: tkc, XID: xid}, nil
 }
 
+// CreateGCFor creates a graphics context for an arbitrary drawable. Needed
+// whenever the GC draws into something other than a root-depth window or
+// pixmap (e.g. an 8-bit alpha mask or a 32-bit ARGB pixmap for RENDER
+// compositing) — a GC's depth must match its drawable's.
+func (tkc *TkConn) CreateGCFor(drawable base.DRAWABLE, fg, bg base.CARD32, font base.FONT) (*GC, error) {
+	xid, err := rpc.CreateGC(tkc.X11Conn, drawable, fg, bg, font)
+	if err != nil {
+		return nil, err
+	}
+	return &GC{Conn: tkc, XID: xid}, nil
+}
+
 // Free releases the graphics context.
 func (g *GC) Free() error {
 	return rpc.FreeGC(g.Conn.X11Conn, g.XID)
