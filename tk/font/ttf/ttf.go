@@ -137,8 +137,25 @@ func (f *Face) DrawString(dstPic *tk_render.Picture, x, y int, s string, fg [3]b
 	if err != nil {
 		return 0, err
 	}
+	cellH := f.Height()
+	ascent := f.Ascent()
 	penX := x
 	for _, r := range s {
+		// Box-drawing runes are hand-drawn against the cell rectangle
+		// instead of rasterized from the font — see boxdraw.go for why.
+		if arms, isBox := boxDrawTable[r]; isBox {
+			adv, ok := f.face.GlyphAdvance(r)
+			if ok {
+				cellW := adv.Round()
+				// cell top = y - ascent, matching where the font itself
+				// would place a full-height glyph relative to baseline y.
+				if err := drawBoxChar(dstPic, penX, y-ascent, cellW, cellH, arms, fg); err != nil {
+					return 0, err
+				}
+				penX += cellW
+				continue
+			}
+		}
 		ge, err := f.glyphFor(r)
 		if err != nil {
 			return 0, err
