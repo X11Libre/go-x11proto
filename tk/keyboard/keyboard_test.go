@@ -121,11 +121,14 @@ func TestLookupSpecialKeys(t *testing.T) {
 		114: {xkRight},
 		110: {xkHome},
 		115: {xkEnd},
+		67:  {xkF1},
+		76:  {xkF12},
 	}
 	m := synthMap(t, 1, tbl)
 	want := map[base.CARD8]Key{
 		36: KeyEnter, 22: KeyBackspace, 119: KeyDelete,
 		113: KeyLeft, 114: KeyRight, 110: KeyHome, 115: KeyEnd,
+		67: KeyF1, 76: KeyF12,
 	}
 	for kc, k := range want {
 		ev := m.Lookup(kc, 0)

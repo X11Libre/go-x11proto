@@ -21,6 +21,12 @@ const (
 	xkEnd       = 0xff57
 	xkKPEnter   = 0xff8d
 	xkDelete    = 0xffff
+
+	// xkF1 (0xffbe) through xkF12 (0xffc9) are contiguous, so specialKey
+	// below maps the whole range with one arithmetic check instead of 12
+	// cases.
+	xkF1  = 0xffbe
+	xkF12 = 0xffc9
 )
 
 // Key is a logical editing/navigation key, decoupled from the raw keysym.
@@ -41,6 +47,18 @@ const (
 	KeyEnd
 	KeyPageUp
 	KeyPageDown
+	KeyF1
+	KeyF2
+	KeyF3
+	KeyF4
+	KeyF5
+	KeyF6
+	KeyF7
+	KeyF8
+	KeyF9
+	KeyF10
+	KeyF11
+	KeyF12
 )
 
 // specialKey maps a keysym to a logical editing key, or KeyNone if the keysym
@@ -73,6 +91,9 @@ func specialKey(ks uint32) Key {
 		return KeyPageUp
 	case xkPageDown:
 		return KeyPageDown
+	}
+	if ks >= xkF1 && ks <= xkF12 {
+		return KeyF1 + Key(ks-xkF1)
 	}
 	return KeyNone
 }

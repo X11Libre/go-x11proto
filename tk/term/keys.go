@@ -47,10 +47,26 @@ func EncodeKey(e keyboard.Event, appCursor bool) []byte {
 	case keyboard.KeyPageDown:
 		return []byte("\x1b[6~")
 	}
+	if n := e.Key - keyboard.KeyF1; n >= 0 && int(n) < len(fkeySeq) {
+		return fkeySeq[n]
+	}
 	if e.Printable() {
 		return []byte(string(e.Rune))
 	}
 	return nil
+}
+
+// fkeySeq holds F1-F12's byte sequences, indexed by (Key - KeyF1). This is
+// the xterm/vt220 convention every terminfo "xterm*" entry advertises (kf1=
+// \EOP, ..., kf12=\E[24~) — F1-F4 are SS3 letters (the old ANSI/VT100 "PF"
+// keys), F5-F12 are CSI ~-terminated numbers with gaps at 16 and 22 (VT220
+// assigned those slots to Help/Do, which most keyboards don't have and
+// xterm never reused). mc and anything else keying off $TERM=xterm* expects
+// exactly this.
+var fkeySeq = [12][]byte{
+	[]byte("\x1bOP"), []byte("\x1bOQ"), []byte("\x1bOR"), []byte("\x1bOS"),
+	[]byte("\x1b[15~"), []byte("\x1b[17~"), []byte("\x1b[18~"), []byte("\x1b[19~"),
+	[]byte("\x1b[20~"), []byte("\x1b[21~"), []byte("\x1b[23~"), []byte("\x1b[24~"),
 }
 
 func arrow(final byte, appCursor bool) []byte {

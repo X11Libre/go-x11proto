@@ -92,6 +92,36 @@ func TestEncodeKeyHomeEndPageUpDown(t *testing.T) {
 	}
 }
 
+// TestEncodeKeyFunctionKeys is a regression test: F1-F12 previously had no
+// keysym mapping at all (not in tk/keyboard's Key enum), so they decoded to
+// KeyNone with Rune 0 and EncodeKey silently sent nothing — mc's F-key
+// shortcuts (F1 help, F10 quit, etc.) just didn't work. The expected bytes
+// are the xterm/vt220 sequences every terminfo "xterm*" entry advertises.
+func TestEncodeKeyFunctionKeys(t *testing.T) {
+	cases := []struct {
+		key  keyboard.Key
+		want string
+	}{
+		{keyboard.KeyF1, "\x1bOP"},
+		{keyboard.KeyF2, "\x1bOQ"},
+		{keyboard.KeyF3, "\x1bOR"},
+		{keyboard.KeyF4, "\x1bOS"},
+		{keyboard.KeyF5, "\x1b[15~"},
+		{keyboard.KeyF6, "\x1b[17~"},
+		{keyboard.KeyF7, "\x1b[18~"},
+		{keyboard.KeyF8, "\x1b[19~"},
+		{keyboard.KeyF9, "\x1b[20~"},
+		{keyboard.KeyF10, "\x1b[21~"},
+		{keyboard.KeyF11, "\x1b[23~"},
+		{keyboard.KeyF12, "\x1b[24~"},
+	}
+	for _, c := range cases {
+		if got := string(EncodeKey(keyboard.Event{Key: c.key}, false)); got != c.want {
+			t.Errorf("%v = %q, want %q", c.key, got, c.want)
+		}
+	}
+}
+
 func TestEncodeKeyUnrecognisedYieldsNil(t *testing.T) {
 	// A pure modifier press or an event with neither a rune nor a logical key
 	// (e.g. a bare Shift keydown) must produce no bytes.
