@@ -12,7 +12,8 @@ type QueryExtensionRequest struct {
 func (r *QueryExtensionRequest) WriteInto(writer *base.RequestWriter) error {
 	writer.SetOpcode(opcode.QueryExtension)
 
-	writer.WriteCARD16(base.CARD16(len(r.Name)))
+	nameLen := base.CARD16(len(r.Name))
+	writer.WriteCARD16(nameLen)
 	writer.WriteCARD16(0) // pad0
 	writer.WriteBytes([]byte(r.Name))
 	return nil

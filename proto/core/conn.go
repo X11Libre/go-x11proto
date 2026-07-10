@@ -63,6 +63,25 @@ type pendingRequest struct {
 }
 
 func NewConn(display_name string, be bool) (*X11Conn, error) {
+	return NewConnWithAuth(display_name, be, "", nil, nil)
+}
+
+// NewConnWithAuth connects to an X11 display with optional authentication.
+//
+// Parameters:
+//   - display_name: X11 display string (e.g. ":0"); empty reads $DISPLAY
+//   - be: true for big-endian wire protocol
+//   - authorityPath: explicit path to an Xauthority file; empty falls back
+//     to the XAUTHORITY environment variable, then ~/.Xauthority
+//   - authProto: explicit auth protocol name (e.g. "MIT-MAGIC-COOKIE-1");
+//     if non-nil this overrides any lookup in the authority file
+//   - authData: the raw auth token bytes; must be non-nil when authProto is set
+//
+// When all three auth parameters are empty/nil, the function reads the
+// Xauthority file (XAUTHORITY or ~/.Xauthority) and picks the entry matching
+// the display.  If no matching entry is found the connection proceeds without
+// authentication — the same behaviour as the legacy NewConn().
+func NewConnWithAuth(display_name string, be bool, authorityPath string, authProto []byte, authData []byte) (*X11Conn, error) {
 	if display_name == "" {
 		display_name = os.Getenv("DISPLAY")
 	}
@@ -70,6 +89,10 @@ func NewConn(display_name string, be bool) (*X11Conn, error) {
 	if err != nil {
 		return nil, MakeX11ConnErrorF("malformed display string: %s - %s", display_name, err)
 	}
+
+	// Resolve auth credentials.
+	protoName, cookie := resolveAuth(display, authorityPath, authProto, authData)
+
 	conn, err := net.Dial(display.DialInfo())
 	if err != nil {
 		return nil, MakeX11ConnErrorF("failed to connect to X11 display: %s: %w", display_name, err)
@@ -90,7 +113,7 @@ func NewConn(display_name string, be bool) (*X11Conn, error) {
 		nextID: 0,
 	}
 
-	if err := c.handshake(); err != nil {
+	if err := c.handshakeWithAuth(protoName, cookie); err != nil {
 		conn.Close()
 		return nil, c.errorF("X11 handshake failed: %w", err)
 	}
@@ -104,15 +127,50 @@ func NewConn(display_name string, be bool) (*X11Conn, error) {
 	return c, nil
 }
 
+// resolveAuth determines the auth protocol name and data to use for the
+// connection.  Explicit arguments override authority-file lookup.
+func resolveAuth(display base.DisplaySpec, authorityPath string, explicitProto []byte, explicitData []byte) (protoName string, cookie []byte) {
+	// Explicit auth always wins.
+	if explicitProto != nil {
+		return string(explicitProto), explicitData
+	}
+
+	// Read the authority file and look up matching entry.
+	entries, err := base.XauthFileOrEntries(authorityPath)
+	if err != nil || len(entries) == 0 {
+		return "", nil
+	}
+	entry := base.LookupXauth(display, entries)
+	if entry == nil {
+		return "", nil
+	}
+	return entry.Proto, entry.Data
+}
+
 const (
 	x11_init_BE = "B\x00\x00\x0B\x00\x00\x00\x00\x00\x00\x00\x00"
 	x11_init_LE = "l\x00\x0B\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 )
 
 func (c *X11Conn) handshake() error {
-	setupReq := x11_init_LE
-	if c.BE {
-		setupReq = x11_init_BE
+	return c.handshakeWithAuth("", nil)
+}
+
+// handshakeWithAuth sends the X11 connection setup request with optional
+// authentication credentials.  When protoName is empty and cookie is nil,
+// the request carries zero-length auth (same as the legacy path).
+func (c *X11Conn) handshakeWithAuth(protoName string, cookie []byte) error {
+	var setupReq []byte
+
+	if protoName == "" && len(cookie) == 0 {
+		// Fast path: original zero-auth request.
+		if c.BE {
+			setupReq = []byte(x11_init_BE)
+		} else {
+			setupReq = []byte(x11_init_LE)
+		}
+	} else {
+		setupReq = c.buildAuthSetupRequest(protoName, cookie)
 	}
 
 	if _, err := c.conn.Write([]byte(setupReq)); err != nil {
@@ -161,6 +219,73 @@ func (c *X11Conn) handshake() error {
 	time.Sleep(30 * time.Millisecond)
 
 	return nil
+}
+
+// buildAuthSetupRequest constructs the X11 Connection Setup request with
+// authentication credentials.  The wire format is (all big-endian unless
+// the connection is big-endian, in which case byte-order flag is 'B'):
+//
+//	Offset  Size  Field
+//	0       1     Byte order ('l' or 'B')
+//	1       1     Unused (0)
+//	2       2     Protocol major version (11)
+//	4       2     Protocol minor version (0)
+//	6       2     Auth name length
+//	8       2     Auth data length
+//	10      2     Unused (0)
+//	12      p4    Auth name (padded to 4-byte boundary)
+//	12+p4   d4    Auth data (padded to 4-byte boundary)
+func (c *X11Conn) buildAuthSetupRequest(protoName string, cookie []byte) []byte {
+	authName := base.FormatAuthName(protoName)
+	authData := base.FormatAuthData(cookie)
+
+	// 12-byte header + padded auth name + padded auth data.
+	totalLen := 12 + len(authName) + len(authData)
+	req := make([]byte, totalLen)
+
+	if c.BE {
+		req[0] = 'B'
+	} else {
+		req[0] = 'l'
+	}
+	// req[1] = 0 (unused)
+
+	// Protocol version: 11.0 (big-endian in wire format)
+	// Multi-byte fields follow the byte order set by req[0] ('l' or 'B').
+	if c.BE {
+		req[2], req[3] = 0, 11 // major version 11, big-endian
+		req[4], req[5] = 0, 0  // minor version 0
+	} else {
+		req[2], req[3] = 11, 0 // major version 11, little-endian
+		req[4], req[5] = 0, 0  // minor version 0
+	}
+
+	// Auth name length — same byte order as the rest of the request.
+	nameLen := len(protoName)
+	if c.BE {
+		req[6] = byte(nameLen >> 8)
+		req[7] = byte(nameLen)
+	} else {
+		req[6] = byte(nameLen)
+		req[7] = byte(nameLen >> 8)
+	}
+
+	// Auth data length — same byte order.
+	dataLen := len(cookie)
+	if c.BE {
+		req[8] = byte(dataLen >> 8)
+		req[9] = byte(dataLen)
+	} else {
+		req[8] = byte(dataLen)
+		req[9] = byte(dataLen >> 8)
+	}
+
+	// req[10], req[11] = 0 (unused)
+
+	copy(req[12:], authName)
+	copy(req[12+len(authName):], authData)
+
+	return req
 }
 
 func (c *X11Conn) readLoop() {
