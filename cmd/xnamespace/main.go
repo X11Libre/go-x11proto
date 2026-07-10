@@ -48,6 +48,7 @@ import (
 
 	"github.com/X11Libre/go-x11proto/proto"
 	"github.com/X11Libre/go-x11proto/proto/base"
+	"github.com/X11Libre/go-x11proto/proto/core"
 	"github.com/X11Libre/go-x11proto/proto/ext/namespace"
 )
 
@@ -57,6 +58,13 @@ import (
 // desktop launching a client into its own namespace). Default is human text.
 var short bool
 
+// auth authority file path (global -a/--authority flag)
+var authorityFile string
+
+// explicit auth entry (global -A/--auth-proto + --auth-data flags)
+var authProto string
+var authDataHex string
+
 func main() {
 	args := parseGlobalFlags(os.Args[1:])
 	if len(args) < 1 {
@@ -64,7 +72,23 @@ func main() {
 		os.Exit(2)
 	}
 
-	conn, err := proto.Dial("")
+	var conn *core.X11Conn
+	var err error
+
+	// Build auth parameters.
+	if authProto != "" && authDataHex != "" {
+		// Explicit inline auth entry (-A/--auth-proto + --auth-data).
+		data, derr := hex.DecodeString(authDataHex)
+		if derr != nil {
+			fatal("bad --auth-data hex: %v", derr)
+		}
+		conn, err = proto.DialAuth("", authorityFile, authProto, data)
+	} else if authProto != "" {
+		fatal("--auth-proto requires --auth-data")
+	} else {
+		// Automatic auth from XAUTHORITY / authority file / no auth.
+		conn, err = proto.DialAuth("", authorityFile, "", nil)
+	}
 	if err != nil {
 		fatal("connect: %v", err)
 	}
@@ -314,16 +338,36 @@ func attrString(a base.CARD32) string {
 // empty (no "(none)" decoration, so scripts get a real empty field).
 func csv(l []string) string { return strings.Join(l, ",") }
 
-// parseGlobalFlags strips the global -s/--short flag from the argument list,
-// leaving the command and its positional arguments.
+// parseGlobalFlags strips global flags from the argument list, leaving the
+// command and its positional arguments.  Supported global flags:
+//
+//	-s, --short              terse output for scripts
+//	-a, --authority <file>   explicit Xauthority file path
+//	-A, --auth-proto <name>  auth protocol name (e.g. MIT-MAGIC-COOKIE-1)
+//	    --auth-data <hex>    auth token as hex string (requires --auth-proto)
 func parseGlobalFlags(in []string) []string {
 	out := make([]string, 0, len(in))
-	for _, a := range in {
-		switch a {
+	for i := 0; i < len(in); i++ {
+		switch in[i] {
 		case "-s", "--short":
 			short = true
+		case "-a", "--authority":
+			if i+1 < len(in) {
+				i++
+				authorityFile = in[i]
+			}
+		case "-A", "--auth-proto":
+			if i+1 < len(in) {
+				i++
+				authProto = in[i]
+			}
+		case "--auth-data":
+			if i+1 < len(in) {
+				i++
+				authDataHex = in[i]
+			}
 		default:
-			out = append(out, a)
+			out = append(out, in[i])
 		}
 	}
 	return out
@@ -391,7 +435,7 @@ func fatal(format string, a ...any) {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `usage: xnamespace <command> [args]
+	fmt.Fprint(os.Stderr, `usage: xnamespace [global-flags] <command> [args]
 
   version                          show extension version
   list                             list all namespaces
@@ -404,9 +448,21 @@ func usage() {
   rmtoken  <name> <handle>         remove an auth token
   tokens   <name>                  list a namespace's auth tokens
 
-options:
+global options:
   -s, --short                      terse, tab-separated, header-less output for
                                    scripts / C (values only; empty on no result)
+  -a, --authority <file>           path to Xauthority file (default: $XAUTHORITY
+                                   or ~/.Xauthority)
+  -A, --auth-proto <name>          auth protocol name, e.g. MIT-MAGIC-COOKIE-1
+      --auth-data <hex>            auth token data as hex (requires --auth-proto)
+
+By default (no -a/-A/--auth-data), xauthority is read from $XAUTHORITY or
+~/.Xauthority and the matching entry for the current $DISPLAY is used.
+
+Examples:
+  xnamespace -s list                                          # auto auth
+  xnamespace -a /tmp/server.xauth -s list                     # explicit file
+  xnamespace -A MIT-MAGIC-COOKIE-1 --auth-data DEADBEEF... -s list  # inline
 
 capabilities: mouse shape transparency input keyboard admin all
 
