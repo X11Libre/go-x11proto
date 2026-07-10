@@ -12,8 +12,10 @@ type ModeState struct {
 	AppCursor      bool // DECSET 1: arrow keys send SS3 instead of CSI codes
 	AppKeypad      bool // DECPAM/DECPNM (ESC = / ESC >)
 	BracketedPaste bool // DECSET 2004
-	MouseReport    int  // 0 = off, else the DECSET number last enabled (1000/1002/1003/1006)
-	AutoWrap       bool // DECSET 7 (default on)
+	MouseReport    int  // 0 = off, else which tracking mode is on (1000/1002/1003)
+	MouseSGR       bool // DECSET 1006: SGR extended coordinate encoding
+
+	AutoWrap bool // DECSET 7 (default on)
 }
 
 // Parser is an ECMA-48/VT100/xterm control-sequence parser that decodes a
@@ -533,13 +535,22 @@ func (p *Parser) setPrivateModes(on bool) {
 					g.RestoreCursor()
 				}
 			}
-		case 1000, 1002, 1003, 1006:
+		case 1000, 1002, 1003:
+			// The tracking mode (which events get reported), independent of
+			// 1006's encoding choice below — real apps enable both (e.g.
+			// ncurses' xterm mouse support turns on 1000+1006 together), and
+			// conflating them into one field previously meant enabling 1006
+			// after 1000 silently forgot that click tracking was on at all.
 			if p.Type.MouseReport {
 				if on {
 					p.Modes.MouseReport = m
 				} else {
 					p.Modes.MouseReport = 0
 				}
+			}
+		case 1006:
+			if p.Type.MouseReport {
+				p.Modes.MouseSGR = on
 			}
 		case 2004:
 			if p.Type.BracketedPaste {

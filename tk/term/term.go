@@ -7,6 +7,8 @@ import (
 	"github.com/X11Libre/go-x11proto/proto/core"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
 	"github.com/X11Libre/go-x11proto/proto/core/events/event_mask"
+	"github.com/X11Libre/go-x11proto/proto/rpc"
+	"github.com/X11Libre/go-x11proto/tk/clipboard"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	"github.com/X11Libre/go-x11proto/tk/font"
 	"github.com/X11Libre/go-x11proto/tk/font/ttf"
@@ -78,11 +80,31 @@ type Term struct {
 	dirty        chan struct{}
 	cols, rows   int
 	scrollOffset int // lines scrolled back from the live bottom; 0 = live
+
+	// primary is a click-drag text selection's PRIMARY-selection owner: a
+	// dedicated offscreen window (same pattern demo/editor uses), so owning
+	// the selection isn't tangled up with the visible window's own X
+	// resource lifetime. Selection only operates on the live view
+	// (scrollOffset 0) — selecting scrolled-back history is a possible
+	// follow-up, not implemented here.
+	clipWin base.WINDOW
+	primary *clipboard.Clipboard
+
+	selActive            bool
+	selDragging          bool // true while the left button is held for a selection drag
+	selAnchor, selCursor cellPos
 }
+
+// cellPos is a (row, col) grid position, used for the selection anchor/end.
+type cellPos struct{ row, col int }
 
 // Init creates and maps the window and its GC. Call Start afterwards to
 // actually spawn a shell — Init alone leaves the widget showing a blank grid,
 // which is enough for size negotiation before a shell exists.
+//
+// Init is idempotent for the X resource parts after a prior Detach: if the
+// grid already exists (from a previous Init or a surviving Detach), only the
+// X resources are recreated.
 func (t *Term) Init() error {
 	if t.Fg == 0 && t.Bg == 0 {
 		t.Fg = t.Conn.X11Conn.DefaultBlackPixel()
@@ -94,10 +116,44 @@ func (t *Term) Init() error {
 	if t.Type.Name == "" {
 		t.Type = XTerm256Color
 	}
-	t.dirty = make(chan struct{}, 1)
+	if t.dirty == nil {
+		t.dirty = make(chan struct{}, 1)
+	}
+
+	if err := t.initX(); err != nil {
+		return err
+	}
+
+	if t.grid == nil {
+		t.cols, t.rows = t.cellSize()
+		t.grid = NewGrid(t.rows, t.cols)
+		t.grid.DefaultFg, t.grid.DefaultBg = Color{}, Color{}
+		if !t.Type.Scrollback {
+			t.grid.scrollbackCap = 0
+		}
+		t.parser = NewParser(t.grid, t.Type)
+		t.parser.Respond = func(b []byte) {
+			if t.pty != nil {
+				_, _ = t.pty.Master.Write(b)
+			}
+		}
+		t.parser.SetTitle = func(s string) {
+			if t.OnTitle != nil {
+				t.OnTitle(s)
+			}
+		}
+	}
+	return nil
+}
+
+// initX creates the X server resources: window, GC (if Font is set), AA
+// rendering resources (if AAFace is set), and the clipboard window. It is
+// called by Init and Attach and requires Drawable.Conn to be valid.
+func (t *Term) initX() error {
 	t.resolver = newPixelResolver(t.Conn.X11Conn)
 
-	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.Exposure | event_mask.StructureNotify | event_mask.ButtonPress)
+	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.Exposure | event_mask.StructureNotify |
+		event_mask.ButtonPress | event_mask.ButtonRelease | event_mask.ButtonMotion)
 	t.Window.SetWindowHandler(t)
 	if err := t.Window.Create(); err != nil {
 		return err
@@ -111,30 +167,155 @@ func (t *Term) Init() error {
 		t.gc = gc
 	}
 	if t.AAFace != nil {
-		geom, err := t.Window.GetGeometry()
-		if err != nil {
+		if err := t.initAA(); err != nil {
 			return err
 		}
-		fmtID, err := t.AARender.StandardFormat(geom.Depth, false)
-		if err != nil {
-			return err
-		}
-		pic, err := t.AARender.PictureFor(t.Window.Drawable, fmtID, tk_render.PictureValues{})
-		if err != nil {
-			return err
-		}
-		t.aaPic = pic
-		t.aaFmt = fmtID
-		t.aaDepth = geom.Depth
 	}
 
+	clipWin, err := rpc.CreateWindow1(t.Conn.X11Conn, t.Conn.X11Conn.DefaultRoot(), -10, -10, 1, 1, clipboard.EventMask)
+	if err != nil {
+		return err
+	}
+	t.clipWin = clipWin
+	primary, err := clipboard.New(t.Conn.X11Conn, clipWin, "PRIMARY")
+	if err != nil {
+		return err
+	}
+	t.primary = primary
+	primary.OnPaste = func(s string) { t.Paste(s) }
+	t.Conn.X11Conn.RegisterWindowHandler(clipWin, primary)
+
+	t.cols, t.rows = t.cellSize()
+	if t.grid != nil {
+		t.grid.Resize(t.rows, t.cols)
+	}
+	return t.Window.Map()
+}
+
+// initAA creates the AA rendering resources (window picture, backbuffer).
+func (t *Term) initAA() error {
+	geom, err := t.Window.GetGeometry()
+	if err != nil {
+		return err
+	}
+	fmtID, err := t.AARender.StandardFormat(geom.Depth, false)
+	if err != nil {
+		return err
+	}
+	pic, err := t.AARender.PictureFor(t.Window.Drawable, fmtID, tk_render.PictureValues{})
+	if err != nil {
+		return err
+	}
+	t.aaPic = pic
+	t.aaFmt = fmtID
+	t.aaDepth = geom.Depth
+	return nil
+}
+
+// Detach destroys all X server resources (window, GC, AA pictures, clipboard
+// window) held by this Term. The shell, PTY, grid, and parser continue
+// running — the grid keeps updating as the shell produces output, but no
+// window is visible. Call Attach to create a new window, possibly on a
+// different X display.
+//
+// Detach must be called while the X11 connection is still alive (all
+// Destroy/Free requests need a working connection). The caller may close the
+// connection afterwards.
+func (t *Term) Detach() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.primary = nil
+
+	if t.aaBackPic != nil {
+		_ = t.aaBackPic.Free()
+		t.aaBackPic = nil
+	}
+	if t.aaBackPix != nil {
+		_ = t.aaBackPix.Free()
+		t.aaBackPix = nil
+	}
+	if t.aaPic != nil {
+		_ = t.aaPic.Free()
+		t.aaPic = nil
+	}
+	if t.gc != nil {
+		_ = t.gc.Free()
+		t.gc = nil
+	}
+	if t.clipWin != 0 {
+		// The clipboard offscreen window is destroyed by the server
+		// implicitly when the connection closes; explicitly forgetting
+		// the XID is enough here.
+		t.clipWin = 0
+	}
+	if t.XID != 0 {
+		_ = t.Window.Destroy()
+		t.XID = 0
+		t.Drawable.XID = 0
+		t.Drawable.Conn = nil
+	}
+	return nil
+}
+
+// Attach creates new X server resources for this Term on tk's X11 connection,
+// which must be a brand-new (or at least not the previously-detached)
+// connection. The caller must set Font, AAFace, AARender, Fg, Bg etc. on t
+// before calling Attach, just as for Init; Grid and Parser state is preserved
+// from before Detach.
+//
+// parent is the XID of the parent window (typically the root window of tk).
+// After Attach the window is mapped and the current grid is redrawn.
+func (t *Term) Attach(tk *tk_core.TkConn, parent base.WINDOW) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.Drawable.Conn = tk
+	t.ParentXID = parent
+	t.Parent = nil
+
+	if err := t.initX(); err != nil {
+		return err
+	}
+	_ = t.Draw()
+	return nil
+}
+
+// cellSize computes the grid dimensions the widget's current pixel size
+// holds, at least 1x1. Returns a default 80x24 when neither Font nor AAFace
+// is set yet (e.g. before Init/Attach).
+func (t *Term) cellSize() (cols, rows int) {
+	var h, cw int
+	if t.AAFace != nil {
+		h, cw = t.AAFace.Height(), t.AAFace.Advance(' ')
+	} else if t.Font != nil {
+		h, cw = t.Font.Height(), t.Font.RuneWidth(' ')
+	} else {
+		return 80, 24
+	}
+	cols = max1(int(t.W) / cw)
+	rows = max1(int(t.H) / h)
+	return
+}
+
+// InitTerm initialises the terminal's grid and parser without creating any
+// X server resources. Call before Start when no X11 connection is available
+// yet (detached mode). After a connection is established, call Init or
+// Attach to create the X window and rendering resources.
+func (t *Term) InitTerm() error {
+	if t.Type.Name == "" {
+		t.Type = XTerm256Color
+	}
+	if t.dirty == nil {
+		t.dirty = make(chan struct{}, 1)
+	}
+	if t.grid != nil {
+		return nil
+	}
 	t.cols, t.rows = t.cellSize()
 	t.grid = NewGrid(t.rows, t.cols)
 	t.grid.DefaultFg, t.grid.DefaultBg = Color{}, Color{}
 	if !t.Type.Scrollback {
-		// Type.Scrollback was previously declared but never actually wired
-		// up: NewGrid always enabled it regardless of profile. A real VT100
-		// had no scrollback at all, so a VT100/VT220 Type should not either.
 		t.grid.scrollbackCap = 0
 	}
 	t.parser = NewParser(t.grid, t.Type)
@@ -148,21 +329,7 @@ func (t *Term) Init() error {
 			t.OnTitle(s)
 		}
 	}
-	return t.Window.Map()
-}
-
-// cellSize computes the grid dimensions the widget's current pixel size
-// holds, at least 1x1.
-func (t *Term) cellSize() (cols, rows int) {
-	var h, cw int
-	if t.AAFace != nil {
-		h, cw = t.AAFace.Height(), t.AAFace.Advance(' ')
-	} else {
-		h, cw = t.Font.Height(), t.Font.RuneWidth(' ')
-	}
-	cols = max1(int(t.W) / cw)
-	rows = max1(int(t.H) / h)
-	return
+	return nil
 }
 
 func max1(v int) int {
@@ -210,7 +377,9 @@ func (t *Term) readLoop() {
 		n, err := t.pty.Master.Read(buf)
 		if n > 0 {
 			t.mu.Lock()
-			t.parser.Feed(buf[:n])
+			if t.parser != nil {
+				t.parser.Feed(buf[:n])
+			}
 			t.mu.Unlock()
 			t.markDirty()
 		}
@@ -695,12 +864,11 @@ func (t *Term) HandleWindowEvent(ev events.Event) bool {
 	case *events.KeyPressEvent:
 		t.handleKey(e)
 	case *events.ButtonPressEvent:
-		switch e.Key {
-		case btnWheelUp:
-			t.ScrollBy(wheelStepLines)
-		case btnWheelDown:
-			t.ScrollBy(-wheelStepLines)
-		}
+		t.handleButtonPress(e)
+	case *events.ButtonReleaseEvent:
+		t.handleButtonRelease(e)
+	case *events.MotionEvent:
+		t.handleMotion(e)
 	}
 	return true
 }
