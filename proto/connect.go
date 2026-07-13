@@ -4,10 +4,13 @@ import (
 	"github.com/X11Libre/go-x11proto/proto/core"
 )
 
+// Dial connects to an X11 display using little-endian byte order.
+// Empty display_name reads $DISPLAY.
 func Dial(display_name string) (*core.X11Conn, error) {
 	return core.NewConn(display_name, false)
 }
 
+// DialBE connects to an X11 display using big-endian byte order.
 func DialBE(display_name string) (*core.X11Conn, error) {
 	return core.NewConn(display_name, true)
 }

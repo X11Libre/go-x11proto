@@ -30,7 +30,6 @@ type XauthEntry struct {
 }
 
 // ReadXauthFile reads and parses an Xauthority file, returning all entries.
-// The file uses a fixed big-endian (network byte order) binary format.
 func ReadXauthFile(path string) ([]XauthEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -103,8 +102,9 @@ func readOneXauthEntry(r io.Reader) (*XauthEntry, error) {
 	return &e, nil
 }
 
-// XauthorityPath returns the path to the Xauthority file. If the XAUTHORITY
-// environment variable is set, it is used; otherwise ~/.Xauthority.
+// XauthorityPath returns the path to the Xauthority file.
+// If the XAUTHORITY environment variable is set, it is used;
+// otherwise ~/.Xauthority is returned.
 func XauthorityPath() string {
 	if p := os.Getenv("XAUTHORITY"); p != "" {
 		return p
