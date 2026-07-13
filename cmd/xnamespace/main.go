@@ -22,6 +22,13 @@
 //
 // Capabilities: mouse shape transparency input keyboard admin all
 //
+// Auth options:
+//
+//	-a/--authority <file>    load entries from this Xauthority file
+//	--no-xauth               skip loading any Xauthority file
+//	-A/--auth-proto + --auth-data   inline auth entry (repeatable);
+//	                               combined with file entries unless --no-xauth
+//
 // Examples:
 //
 //	# create a namespace with two capabilities
@@ -61,9 +68,20 @@ var short bool
 // auth authority file path (global -a/--authority flag)
 var authorityFile string
 
-// explicit auth entry (global -A/--auth-proto + --auth-data flags)
-var authProto string
-var authDataHex string
+// --no-xauth: skip loading any xauth file
+var noXauth bool
+
+// inline auth entries (from repeatable -A/--auth-proto + --auth-data pairs)
+type authEntry struct {
+	proto   string
+	dataHex string
+}
+
+var inlineAuthEntries []authEntry
+
+// pendingAuthProto tracks a -A/--auth-proto value waiting for its --auth-data
+// during flag parsing.
+var pendingAuthProto string
 
 func main() {
 	args := parseGlobalFlags(os.Args[1:])
@@ -72,23 +90,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	var conn *core.X11Conn
-	var err error
-
-	// Build auth parameters.
-	if authProto != "" && authDataHex != "" {
-		// Explicit inline auth entry (-A/--auth-proto + --auth-data).
-		data, derr := hex.DecodeString(authDataHex)
-		if derr != nil {
-			fatal("bad --auth-data hex: %v", derr)
-		}
-		conn, err = proto.DialAuth("", authorityFile, authProto, data)
-	} else if authProto != "" {
-		fatal("--auth-proto requires --auth-data")
-	} else {
-		// Automatic auth from XAUTHORITY / authority file / no auth.
-		conn, err = proto.DialAuth("", authorityFile, "", nil)
-	}
+	conn, err := connectAuth()
 	if err != nil {
 		fatal("connect: %v", err)
 	}
@@ -248,6 +250,70 @@ func main() {
 	}
 }
 
+// --- auth resolution ---
+
+// connectAuth establishes an X11 connection using the combined auth
+// configuration from flags: authority file (unless --no-xauth) plus any
+// inline -A/--auth-proto + --auth-data entries.
+func connectAuth() (*core.X11Conn, error) {
+	// Fast path: no inline entries and no --no-xauth → standard resolution.
+	if len(inlineAuthEntries) == 0 && !noXauth {
+		return proto.DialAuth("", authorityFile, "", nil)
+	}
+
+	// Build combined entry list from file + inline sources.
+	var entries []base.XauthEntry
+
+	if !noXauth {
+		fileEntries, ferr := base.XauthFileOrEntries(authorityFile)
+		if ferr != nil {
+			return nil, ferr
+		}
+		entries = append(entries, fileEntries...)
+	}
+
+	for _, ae := range inlineAuthEntries {
+		data, derr := hex.DecodeString(ae.dataHex)
+		if derr != nil {
+			return nil, fmt.Errorf("bad --auth-data hex: %v", derr)
+		}
+		entries = append(entries, base.XauthEntry{
+			Family: base.XauthFamilyWild,
+			Proto:  ae.proto,
+			Data:   data,
+		})
+	}
+
+	if len(entries) == 0 {
+		return proto.DialAuth("", "", "", nil)
+	}
+
+	// Single entry from file only (no inline) → let DialAuth handle it.
+	if len(inlineAuthEntries) == 0 && len(entries) > 0 {
+		return proto.DialAuth("", authorityFile, "", nil)
+	}
+
+	// Multiple entries or mixed sources → resolve via display lookup.
+	displayStr := os.Getenv("DISPLAY")
+	if displayStr == "" {
+		// No DISPLAY: use first inline entry as fallback.
+		ae := inlineAuthEntries[0]
+		data, _ := hex.DecodeString(ae.dataHex)
+		return proto.DialAuth("", "", ae.proto, data)
+	}
+
+	display, derr := base.ParseDisplay(displayStr)
+	if derr != nil {
+		return nil, fmt.Errorf("bad DISPLAY: %v", derr)
+	}
+
+	entry := base.LookupXauth(display, entries)
+	if entry != nil {
+		return proto.DialAuth("", "", entry.Proto, entry.Data)
+	}
+	return proto.DialAuth("", "", "", nil)
+}
+
 // --- capability / attribute parsing ---
 
 var capByName = map[string]base.CARD32{
@@ -343,8 +409,9 @@ func csv(l []string) string { return strings.Join(l, ",") }
 //
 //	-s, --short              terse output for scripts
 //	-a, --authority <file>   explicit Xauthority file path
-//	-A, --auth-proto <name>  auth protocol name (e.g. MIT-MAGIC-COOKIE-1)
-//	    --auth-data <hex>    auth token as hex string (requires --auth-proto)
+//	    --no-xauth           skip loading any Xauthority file
+//	-A, --auth-proto <name>  auth protocol name (repeatable, pairs with --auth-data)
+//	    --auth-data <hex>    auth token as hex string (requires preceding --auth-proto)
 func parseGlobalFlags(in []string) []string {
 	out := make([]string, 0, len(in))
 	for i := 0; i < len(in); i++ {
@@ -356,19 +423,28 @@ func parseGlobalFlags(in []string) []string {
 				i++
 				authorityFile = in[i]
 			}
+		case "--no-xauth":
+			noXauth = true
 		case "-A", "--auth-proto":
 			if i+1 < len(in) {
 				i++
-				authProto = in[i]
+				pendingAuthProto = in[i]
 			}
 		case "--auth-data":
 			if i+1 < len(in) {
 				i++
-				authDataHex = in[i]
+				if pendingAuthProto == "" {
+					fatal("--auth-data requires a preceding --auth-proto")
+				}
+				inlineAuthEntries = append(inlineAuthEntries, authEntry{pendingAuthProto, in[i]})
+				pendingAuthProto = ""
 			}
 		default:
 			out = append(out, in[i])
 		}
+	}
+	if pendingAuthProto != "" {
+		fatal("--auth-proto %q requires a following --auth-data", pendingAuthProto)
 	}
 	return out
 }
@@ -429,7 +505,9 @@ func check(err error) {
 	}
 }
 
-func fatal(format string, a ...any) {
+// fatal prints an error message to stderr and exits.  Variable so that tests
+// can override it to observe the message instead of calling os.Exit.
+var fatal = func(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "xnamespace: "+format+"\n", a...)
 	os.Exit(1)
 }
@@ -453,16 +531,27 @@ global options:
                                    scripts / C (values only; empty on no result)
   -a, --authority <file>           path to Xauthority file (default: $XAUTHORITY
                                    or ~/.Xauthority)
-  -A, --auth-proto <name>          auth protocol name, e.g. MIT-MAGIC-COOKIE-1
-      --auth-data <hex>            auth token data as hex (requires --auth-proto)
+      --no-xauth                   skip loading any Xauthority file
+  -A, --auth-proto <name>          auth protocol name (repeatable, e.g.
+                                   MIT-MAGIC-COOKIE-1); each must be followed by
+                                   --auth-data
+      --auth-data <hex>            auth token data as hex (requires preceding
+                                   --auth-proto; may be repeated)
 
 By default (no -a/-A/--auth-data), xauthority is read from $XAUTHORITY or
 ~/.Xauthority and the matching entry for the current $DISPLAY is used.
 
+Multiple -A/--auth-proto + --auth-data pairs may be specified; entries are
+combined with any file-based entries and the best match for $DISPLAY is used.
+With --no-xauth, only inline entries are considered (file is not loaded).
+
 Examples:
   xnamespace -s list                                          # auto auth
   xnamespace -a /tmp/server.xauth -s list                     # explicit file
+  xnamespace --no-xauth -s list                               # no auth file
   xnamespace -A MIT-MAGIC-COOKIE-1 --auth-data DEADBEEF... -s list  # inline
+  xnamespace -a /tmp/server.xauth \
+             -A MIT-MAGIC-COOKIE-1 --auth-data AABB... -s list      # combined
 
 capabilities: mouse shape transparency input keyboard admin all
 
