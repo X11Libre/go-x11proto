@@ -1,4 +1,9 @@
 /go-x11proto
+/xnamespace
 /simple
 /tetris64
 /editor
+/fonttest
+/terminal
+/terminal-aa
+/terminal-aa-detach
