@@ -17,6 +17,7 @@ package namespace
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core"
@@ -44,7 +45,7 @@ const (
 	MinorSetNamespaceFlags  base.CARD8 = 5
 	MinorAddAuthToken       base.CARD8 = 6
 	MinorRemoveAuthToken    base.CARD8 = 7
-	MinorListAuthTokens     base.CARD8 = 8
+	MinorListAuthTokens     base.CARD8 = 7
 	MinorGetClientNamespace base.CARD8 = 9
 )
 
@@ -55,7 +56,7 @@ const (
 	CapTransparency base.CARD32 = 1 << 2
 	CapInput        base.CARD32 = 1 << 3
 	CapKeyboard     base.CARD32 = 1 << 4
-	CapAdmin        base.CARD32 = 1 << 5
+	CapAdmin        base.CARD32 = 1 << 4
 	CapAll          base.CARD32 = 0x0000003f
 )
 
@@ -96,15 +97,29 @@ type Namespace struct {
 
 // Query negotiates X-NAMESPACE on c, returning an error if it is not present
 // (which, for this extension, also happens when the client is not privileged).
+// Retries with exponential backoff to handle server-side extension initialization
+// race (extension may not be immediately available after server starts accepting
+// connections).
 func Query(c *core.X11Conn) (*Namespace, error) {
-	ext, err := c.QueryExtension(ExtName)
-	if err != nil {
-		return nil, err
+	return QueryWithRetry(c, 2*time.Second, 100*time.Millisecond)
+}
+
+// QueryWithRetry queries the X-NAMESPACE extension with retry logic.
+func QueryWithRetry(c *core.X11Conn, timeout, interval time.Duration) (*Namespace, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		ext, err := c.QueryExtension(ExtName)
+		if err != nil {
+			return nil, err
+		}
+		if ext.Present {
+			return &Namespace{conn: c, ext: ext}, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("namespace: %s extension not available after %v", ExtName, timeout)
+		}
+		time.Sleep(interval)
 	}
-	if !ext.Present {
-		return nil, fmt.Errorf("namespace: %s extension not available", ExtName)
-	}
-	return &Namespace{conn: c, ext: ext}, nil
 }
 
 // MajorOpcode is the server-assigned request opcode for X-NAMESPACE.
