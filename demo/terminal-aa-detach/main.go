@@ -2,16 +2,18 @@
 // X server and later reattach, controlled via a pipe or signal.
 //
 // Control pipe (TERM_CTRL_FD):
-//   detach            detach from X server (shell keeps running)
-//   attach <display>  attach to display (e.g. ":1")
-//   status            print "attached" or "detached"
-//   quit              exit (kills shell)
+//
+//	detach            detach from X server (shell keeps running)
+//	attach <display>  attach to display (e.g. ":1")
+//	status            print "attached" or "detached"
+//	quit              exit (kills shell)
 //
 // Signals:
-//   SIGUSR1   detach
-//   SIGUSR2   attach to $DISPLAY
-//   SIGINT    quit
-//   SIGTERM   quit
+//
+//	SIGUSR1   detach
+//	SIGUSR2   attach to $DISPLAY
+//	SIGINT    quit
+//	SIGTERM   quit
 //
 // Usage: terminal-aa-detach [--detached] [shell-command]
 //
@@ -29,8 +31,8 @@ import (
 	"syscall"
 
 	"github.com/X11Libre/go-x11proto/proto"
-	"github.com/X11Libre/go-x11proto/proto/core/events"
 	proto_core "github.com/X11Libre/go-x11proto/proto/core"
+	"github.com/X11Libre/go-x11proto/proto/core/events"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	"github.com/X11Libre/go-x11proto/tk/font/ttf"
 	tk_render "github.com/X11Libre/go-x11proto/tk/render"
@@ -85,12 +87,12 @@ func main() {
 	}
 
 	a.t = &term.Term{
-		Type:     term.XTerm256Color,
-		FgRGB:    [3]byte{0xff, 0xff, 0xff},
-		BgRGB:    [3]byte{0x00, 0x00, 0x00},
-		OnTitle:  func(s string) { log.Printf("title: %s", s) },
-		OnExit:   func(err error) { os.Exit(0) },
-		Shell:    shell,
+		Type:    term.XTerm256Color,
+		FgRGB:   [3]byte{0xff, 0xff, 0xff},
+		BgRGB:   [3]byte{0x00, 0x00, 0x00},
+		OnTitle: func(s string) { log.Printf("title: %s", s) },
+		OnExit:  func(err error) { os.Exit(0) },
+		Shell:   shell,
 	}
 	if err := a.t.InitTerm(); err != nil {
 		log.Fatalf("init term: %v", err)
