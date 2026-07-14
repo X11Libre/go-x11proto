@@ -11,7 +11,7 @@ import (
 
 // XauthFamily constants (network byte order in file, but stored as uint16).
 const (
-	XauthFamilyLocal    uint16 = 256  // FamilyLocal (0x100 big-endian)
+	XauthFamilyLocal    uint16 = 256 // FamilyLocal (0x100 big-endian)
 	XauthFamilyWild     uint16 = 65535
 	XauthFamilyNetname  uint16 = 257
 	XauthFamilyKernel   uint16 = 258
@@ -22,11 +22,11 @@ const (
 
 // XauthEntry holds one parsed entry from an Xauthority file.
 type XauthEntry struct {
-	Family   uint16
-	Address  []byte
-	Number   string // display number as string, e.g. "0"
-	Proto    string // auth protocol name, e.g. "MIT-MAGIC-COOKIE-1"
-	Data     []byte // auth data (the cookie)
+	Family  uint16
+	Address []byte
+	Number  string // display number as string, e.g. "0"
+	Proto   string // auth protocol name, e.g. "MIT-MAGIC-COOKIE-1"
+	Data    []byte // auth data (the cookie)
 }
 
 // ReadXauthFile reads and parses an Xauthority file, returning all entries.
