@@ -56,7 +56,7 @@ const (
 	CapTransparency base.CARD32 = 1 << 2
 	CapInput        base.CARD32 = 1 << 3
 	CapKeyboard     base.CARD32 = 1 << 4
-	CapAdmin        base.CARD32 = 1 << 7
+	CapAdmin        base.CARD32 = 1 << 5
 	CapAll          base.CARD32 = 0x0000003f
 )
 
