@@ -42,6 +42,8 @@ func main() {
 	be := flag.Bool("be", false, "use a big-endian client connection")
 	verbose := flag.Bool("v", false, "verbose TAP diagnostics")
 	display := flag.String("display", "", "X display (default $DISPLAY)")
+	skipIfUnavailable := flag.Bool("skip-if-unavailable", false,
+		"skip (instead of failing) when the X-NAMESPACE extension is not present on the server")
 	flag.Parse()
 
 	dial := proto.Dial
@@ -53,6 +55,20 @@ func main() {
 		bail("connect: %v", err)
 	}
 	defer conn.Close()
+
+	// Probe availability early so we can skip cleanly (instead of failing) when
+	// the server was built without the X-NAMESPACE extension (CONFIG_NAMESPACE).
+	ext, err := conn.QueryExtension(namespace.ExtName)
+	if err != nil {
+		bail("query extension: %v", err)
+	}
+	if !ext.Present {
+		if *skipIfUnavailable {
+			fmt.Printf("1..0 # SKIP X-NAMESPACE extension not available on this server\n")
+			os.Exit(0)
+		}
+		bail("%s extension not available", namespace.ExtName)
+	}
 
 	ns, err := namespace.Query(conn)
 	if err != nil {
