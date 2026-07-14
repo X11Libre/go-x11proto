@@ -45,7 +45,7 @@ const (
 	MinorSetNamespaceFlags  base.CARD8 = 5
 	MinorAddAuthToken       base.CARD8 = 6
 	MinorRemoveAuthToken    base.CARD8 = 7
-	MinorListAuthTokens     base.CARD8 = 7
+	MinorListAuthTokens     base.CARD8 = 8
 	MinorGetClientNamespace base.CARD8 = 9
 )
 
@@ -56,7 +56,7 @@ const (
 	CapTransparency base.CARD32 = 1 << 2
 	CapInput        base.CARD32 = 1 << 3
 	CapKeyboard     base.CARD32 = 1 << 4
-	CapAdmin        base.CARD32 = 1 << 4
+	CapAdmin        base.CARD32 = 1 << 7
 	CapAll          base.CARD32 = 0x0000003f
 )
 
