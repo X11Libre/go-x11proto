@@ -627,12 +627,16 @@ func (t *Term) writeOSC52(sel, data string) {
 
 // ownSelection takes ownership of the appropriate X selection(s) for an OSC 52
 // set, based on the Pc selector: 'p' -> PRIMARY, 'c' -> CLIPBOARD, 's' -> both,
-// a bare/numeric selector -> CLIPBOARD.
+// a bare/numeric selector -> CLIPBOARD. As a convenience for middle-click paste
+// (which reads PRIMARY), an explicit 'c' also populates PRIMARY.
 func (t *Term) ownSelection(sel, text string) {
 	wantPrimary := strings.ContainsRune(sel, 'p') || strings.ContainsRune(sel, 'P')
 	wantClip := strings.ContainsRune(sel, 'c') || strings.ContainsRune(sel, 'C')
 	if strings.ContainsRune(sel, 's') || strings.ContainsRune(sel, 'S') {
 		wantPrimary, wantClip = true, true
+	}
+	if wantClip && !wantPrimary {
+		wantPrimary = true // "c" also feeds PRIMARY so middle-click paste works
 	}
 	if !wantPrimary && !wantClip {
 		wantClip = true // bare numeric selectors target CLIPBOARD
