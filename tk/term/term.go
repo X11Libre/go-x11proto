@@ -66,6 +66,14 @@ type Term struct {
 	OnNotify    func(message string)
 	OnOSC777    func(payload string)
 
+	// oscClipPending is the FIFO of OSC 52 selection names (e.g. "c"/"p")
+	// whose contents an application has requested via OSC 52 ; sel ; ?. As
+	// each request's SelectionNotify arrives (via primary.OnPaste in the
+	// event loop), the next name is popped and the text is written back to
+	// the PTY as OSC 52 ; sel ; <base64>. Guarded by oscClipMu.
+	oscClipPending []string
+	oscClipMu      sync.Mutex
+
 	gc       *tk_core.GC
 	resolver pixelResolver
 	aaPic    *tk_render.Picture
@@ -188,7 +196,20 @@ func (t *Term) initX() error {
 		return err
 	}
 	t.primary = primary
-	primary.OnPaste = func(s string) { t.Paste(s) }
+	primary.OnPaste = func(s string) {
+		// An OSC 52 ; sel ; ? query in flight takes priority: its answer is
+		// the selection text written back to the PTY, not pasted as keystrokes.
+		t.oscClipMu.Lock()
+		if n := len(t.oscClipPending); n > 0 {
+			sel := t.oscClipPending[0]
+			t.oscClipPending = t.oscClipPending[1:]
+			t.oscClipMu.Unlock()
+			t.writeOSC52(sel, s)
+			return
+		}
+		t.oscClipMu.Unlock()
+		t.Paste(s)
+	}
 	t.Conn.X11Conn.RegisterWindowHandler(clipWin, primary)
 
 	t.cols, t.rows = t.cellSize()
@@ -356,6 +377,29 @@ func (t *Term) wireOSC() {
 	t.parser.RequestClipboard = func(sel string) {
 		if t.OnClipboard != nil {
 			t.OnClipboard(sel, "?")
+		}
+		if t.primary == nil {
+			return
+		}
+		// Queue the selection name so the async SelectionNotify (delivered
+		// through primary.OnPaste in the event loop) knows which OSC 52
+		// response to write. RequestText returns false only when there is no
+		// owner at all, in which case respond immediately with an empty value.
+		t.oscClipMu.Lock()
+		t.oscClipPending = append(t.oscClipPending, sel)
+		t.oscClipMu.Unlock()
+		ok, err := t.primary.RequestText()
+		if err != nil {
+			t.oscClipMu.Lock()
+			t.oscClipPending = t.oscClipPending[:len(t.oscClipPending)-1]
+			t.oscClipMu.Unlock()
+			return
+		}
+		if !ok {
+			t.oscClipMu.Lock()
+			t.oscClipPending = t.oscClipPending[:len(t.oscClipPending)-1]
+			t.oscClipMu.Unlock()
+			t.writeOSC52(sel, "")
 		}
 	}
 	t.parser.SetHyperlink = func(params, uri string) {
@@ -537,6 +581,17 @@ func (t *Term) Paste(s string) {
 	bp := t.parser.Modes.BracketedPaste
 	t.mu.Unlock()
 	_, _ = t.pty.Master.Write(bracketPaste(s, bp))
+}
+
+// writeOSC52 answers an OSC 52 selection query by writing
+// "OSC 52 ; sel ; <base64> ST" back to the PTY, so the application receives
+// the current selection contents (or an empty one if none).
+func (t *Term) writeOSC52(sel, data string) {
+	if t.pty == nil {
+		return
+	}
+	resp := "\x1b]52;" + sel + ";" + base64.StdEncoding.EncodeToString([]byte(data)) + "\x07"
+	_, _ = t.pty.Master.Write([]byte(resp))
 }
 
 // Draw repaints the whole grid, batching same-style runs per row so the GC's
