@@ -29,9 +29,9 @@ func TestNewGridBlank(t *testing.T) {
 
 func TestPutRuneAdvances(t *testing.T) {
 	g := NewGrid(2, 3)
-	g.PutRune('a', Color{}, Color{}, 0)
-	g.PutRune('b', Color{}, Color{}, 0)
-	g.PutRune('c', Color{}, Color{}, 0)
+	g.PutRune('a', Color{}, Color{}, 0, "")
+	g.PutRune('b', Color{}, Color{}, 0, "")
+	g.PutRune('c', Color{}, Color{}, 0, "")
 	if g.CursorCol != 3 {
 		t.Fatalf("CursorCol = %d, want 3 (past edge; Grid itself never wraps)", g.CursorCol)
 	}
@@ -47,9 +47,9 @@ func TestPutRuneClampsInsteadOfWrapping(t *testing.T) {
 	// TestFeedAutoWrapOffOverwritesLastColumn in parser_test.go for the
 	// behaviour actually driven through Feed.
 	g := NewGrid(1, 2)
-	g.PutRune('a', Color{}, Color{}, 0)
-	g.PutRune('b', Color{}, Color{}, 0)
-	g.PutRune('c', Color{}, Color{}, 0)
+	g.PutRune('a', Color{}, Color{}, 0, "")
+	g.PutRune('b', Color{}, Color{}, 0, "")
+	g.PutRune('c', Color{}, Color{}, 0, "")
 	if text(g.cur[0]) != "ac" {
 		t.Errorf("row0 = %q, want %q ('c' overwriting the clamped last column)", text(g.cur[0]), "ac")
 	}

@@ -256,6 +256,73 @@ func TestOSCSetTitleTerminatedByST(t *testing.T) {
 	}
 }
 
+func TestOSC52SetClipboard(t *testing.T) {
+	var gotSel, gotData string
+	_, p := newParser(2, 2, XTerm256Color)
+	p.SetClipboard = func(sel, data string) { gotSel, gotData = sel, data }
+	p.Feed([]byte("\x1b]52;c;aGVsbG8=\x07")) // base64("hello")
+	if gotSel != "c" || gotData != "aGVsbG8=" {
+		t.Errorf("clipboard = %q,%q want c,aGVsbG8=", gotSel, gotData)
+	}
+}
+
+func TestOSC52QueryClipboard(t *testing.T) {
+	var reqSel string
+	queried := false
+	_, p := newParser(2, 2, XTerm256Color)
+	p.RequestClipboard = func(sel string) { reqSel, queried = sel, true }
+	p.Feed([]byte("\x1b]52;p;?\x07"))
+	if !queried || reqSel != "p" {
+		t.Errorf("RequestClipboard sel = %q queried=%v, want p,true", reqSel, queried)
+	}
+}
+
+func TestOSC8HyperlinkTagsCells(t *testing.T) {
+	g, p := newParser(2, 10, XTerm256Color)
+	p.Feed([]byte("\x1b]8;;https://example.com\x07"))
+	p.Feed([]byte("link"))
+	if g.cur[0][0].Link != "https://example.com" {
+		t.Errorf("cell link = %q, want %q", g.cur[0][0].Link, "https://example.com")
+	}
+	// an empty-URI OSC 8 ends the hyperlink; the next cell (col 4, after
+	// the four chars of "link") must not be tagged.
+	p.Feed([]byte("\x1b]8;;\x07"))
+	p.Feed([]byte("x"))
+	if g.cur[0][4].Link != "" {
+		t.Errorf("cell link after end = %q, want empty", g.cur[0][4].Link)
+	}
+}
+
+func TestOSC8HyperlinkCallback(t *testing.T) {
+	var gotParams, gotURI string
+	_, p := newParser(2, 2, XTerm256Color)
+	p.SetHyperlink = func(params, uri string) { gotParams, gotURI = params, uri }
+	p.Feed([]byte("\x1b]8;id=42;https://x.org\x07"))
+	if gotParams != "id=42" || gotURI != "https://x.org" {
+		t.Errorf("hyperlink = %q,%q want id=42,https://x.org", gotParams, gotURI)
+	}
+}
+
+func TestOSC9Notify(t *testing.T) {
+	var msg string
+	_, p := newParser(2, 2, XTerm256Color)
+	p.Notify = func(m string) { msg = m }
+	p.Feed([]byte("\x1b]9;build done\x07"))
+	if msg != "build done" {
+		t.Errorf("notify = %q, want %q", msg, "build done")
+	}
+}
+
+func TestOSC777Custom(t *testing.T) {
+	var payload string
+	_, p := newParser(2, 2, XTerm256Color)
+	p.OSC777 = func(s string) { payload = s }
+	p.Feed([]byte("\x1b]777;notify;title;body\x07"))
+	if payload != "notify;title;body" {
+		t.Errorf("osc777 = %q, want %q", payload, "notify;title;body")
+	}
+}
+
 func TestUTF8SplitAcrossFeedCalls(t *testing.T) {
 	g, p := newParser(1, 5, XTerm256Color)
 	euro := "€" // 3-byte UTF-8

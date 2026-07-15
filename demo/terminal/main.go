@@ -10,6 +10,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"log"
 	"os"
 
@@ -51,6 +52,30 @@ func main() {
 			// t.Window; not exposed by tk_core.Window as a runtime setter
 			// yet, so this is logged for now rather than silently dropped.
 			log.Printf("title: %s", s)
+		},
+		OnClipboard: func(sel, data string) {
+			if data == "?" {
+				log.Printf("clipboard query: sel=%s", sel)
+				return
+			}
+			if dec, err := base64.StdEncoding.DecodeString(data); err == nil {
+				log.Printf("clipboard set: sel=%s data=%q", sel, string(dec))
+			} else {
+				log.Printf("clipboard set: sel=%s (bad base64: %v)", sel, err)
+			}
+		},
+		OnHyperlink: func(params, uri string) {
+			if uri == "" {
+				log.Printf("hyperlink end")
+			} else {
+				log.Printf("hyperlink: params=%q uri=%s", params, uri)
+			}
+		},
+		OnNotify: func(msg string) {
+			log.Printf("notify: %s", msg)
+		},
+		OnOSC777: func(payload string) {
+			log.Printf("osc777: %s", payload)
 		},
 		OnExit: func(err error) {
 			os.Exit(0)

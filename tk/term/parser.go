@@ -1,6 +1,9 @@
 package term
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // ModeState is the runtime-toggled subset of terminal behaviour that DECSET/
 // DECRST (CSI ? Pm h/l) turns on and off during a session — distinct from
@@ -32,8 +35,28 @@ type Parser struct {
 	// Respond, if set, is called with bytes that must be written back to the
 	// PTY (device attribute/status reports the appli­cation asked for with DA
 	// or DSR). SetTitle, if set, is called on OSC 0/1/2 (window/icon title).
+	// The remaining callbacks fire on the extra OSC codes; each is a no-op
+	// when nil, so a caller only wires what it cares about.
 	Respond  func([]byte)
 	SetTitle func(string)
+
+	// SetClipboard, if set, is called on OSC 52 with the selection name
+	// ("c"=CLIPBOARD, "p"=PRIMARY, "s"=SECONDARY, "0"/"1"/…=clipboard N) and
+	// the raw (base64) payload. A "?" payload is a request: the consumer
+	// should instead respond via RequestClipboard.
+	SetClipboard func(selection, data string)
+	// RequestClipboard, if set, is called on OSC 52 when the application asks
+	// for the current selection (payload "?"); the consumer should write the
+	// value back to the PTY as OSC 52 ; selection ; <base64>.
+	RequestClipboard func(selection string)
+	// SetHyperlink, if set, is called on OSC 8 with the ';'-separated params
+	// (e.g. "id=xyz") and the URI. An empty URI ends the current hyperlink.
+	SetHyperlink func(params, uri string)
+	// Notify, if set, is called on OSC 9 with a desktop-notification message.
+	Notify func(message string)
+	// OSC777, if set, is called on OSC 777 with the raw payload, for custom
+	// extensions / custom protocols the terminal doesn't interpret itself.
+	OSC777 func(payload string)
 
 	curFg, curBg Color
 	curAttr      Attr
@@ -43,6 +66,10 @@ type Parser struct {
 	private byte // '?', '<', '=', '>', or 0
 	strBuf  []byte
 	pending []byte // incomplete UTF-8 bytes carried across Feed calls
+
+	// curLink is the OSC 8 hyperlink URI currently in effect; cells written
+	// while it is non-empty get tagged with it (cleared on an empty-URI OSC 8).
+	curLink string
 
 	// awaitingST is set while collecting an OSC/DCS/PM/APC/SOS string and we
 	// just saw ESC: the next byte decides whether it's '\' (ST, terminating
@@ -212,7 +239,7 @@ func (p *Parser) putRune(r rune) {
 		g.CursorCol = 0
 		g.newline()
 	}
-	g.PutRune(r, p.curFg, p.curBg, p.curAttr)
+	g.PutRune(r, p.curFg, p.curBg, p.curAttr, p.curLink)
 }
 
 func (p *Parser) c0(b byte) {
@@ -687,19 +714,70 @@ func (p *Parser) osc(b byte) {
 
 func (p *Parser) finishOSC() {
 	s := string(p.strBuf)
-	// "Ps;Pt": we only act on Ps == 0, 1, 2 (icon/window title).
-	sep := -1
-	for i := 0; i < len(s); i++ {
-		if s[i] == ';' {
-			sep = i
-			break
-		}
-	}
+	// "Ps;Pt": dispatch on Ps, ignoring anything we don't recognise.
+	sep := strings.IndexByte(s, ';')
 	if sep < 0 {
 		return
 	}
 	ps := s[:sep]
-	if (ps == "0" || ps == "1" || ps == "2") && p.SetTitle != nil {
-		p.SetTitle(s[sep+1:])
+	pt := s[sep+1:]
+	switch ps {
+	case "0", "1", "2":
+		if p.SetTitle != nil {
+			p.SetTitle(pt)
+		}
+	case "52":
+		p.oscClipboard(pt)
+	case "8":
+		p.oscHyperlink(pt)
+	case "9":
+		if p.Notify != nil {
+			p.Notify(pt)
+		}
+	case "777":
+		if p.OSC777 != nil {
+			p.OSC777(pt)
+		}
+	}
+}
+
+// oscClipboard handles OSC 52: "Pc;Pd". Pd is base64-encoded data, or "?" to
+// request the current selection.
+func (p *Parser) oscClipboard(pt string) {
+	sep := strings.IndexByte(pt, ';')
+	if sep < 0 {
+		return
+	}
+	sel := pt[:sep]
+	data := pt[sep+1:]
+	if data == "?" {
+		if p.RequestClipboard != nil {
+			p.RequestClipboard(sel)
+		}
+		return
+	}
+	if p.SetClipboard != nil {
+		p.SetClipboard(sel, data)
+	}
+}
+
+// oscHyperlink handles OSC 8: "params;uri". An empty URI ends the current
+// hyperlink; the params may themselves be empty ("8;;uri").
+func (p *Parser) oscHyperlink(pt string) {
+	sep := strings.IndexByte(pt, ';')
+	if sep < 0 {
+		p.SetHyperlink("", "")
+		p.curLink = ""
+		return
+	}
+	params := pt[:sep]
+	uri := pt[sep+1:]
+	if p.SetHyperlink != nil {
+		p.SetHyperlink(params, uri)
+	}
+	if uri == "" {
+		p.curLink = ""
+	} else {
+		p.curLink = uri
 	}
 }

@@ -21,6 +21,7 @@ type Cell struct {
 	Rune   rune
 	Fg, Bg Color
 	Attr   Attr
+	Link   string // active OSC 8 hyperlink URI for this cell, "" if none
 }
 
 // Grid is the fixed Rows x Cols character buffer a Parser mutates and a Term
@@ -90,17 +91,18 @@ func (g *Grid) Cell(row, col int) Cell {
 // background, not always black).
 func (g *Grid) blank() Cell { return Cell{Rune: ' ', Fg: g.DefaultFg, Bg: g.DefaultBg} }
 
-// PutRune writes r at the cursor in the given style and advances the cursor
-// one column. It does not itself wrap: if the cursor is already past the
-// last column it clamps back onto it, so repeated writes with no wrap simply
-// keep overwriting the last cell. Deciding whether to wrap first is the
-// caller's job (see Parser.putRune), since that decision depends on the
-// AutoWrap mode, which Grid has no notion of.
-func (g *Grid) PutRune(r rune, fg, bg Color, attr Attr) {
+// PutRune writes r at the cursor in the given style (link is an optional OSC 8
+// hyperlink URI to tag the cell with) and advances the cursor one column. It
+// does not itself wrap: if the cursor is already past the last column it
+// clamps back onto it, so repeated writes with no wrap simply keep
+// overwriting the last cell. Deciding whether to wrap first is the caller's
+// job (see Parser.putRune), since that decision depends on the AutoWrap mode,
+// which Grid has no notion of.
+func (g *Grid) PutRune(r rune, fg, bg Color, attr Attr, link string) {
 	if g.CursorCol >= g.Cols {
 		g.CursorCol = g.Cols - 1
 	}
-	g.cur[g.CursorRow][g.CursorCol] = Cell{Rune: r, Fg: fg, Bg: bg, Attr: attr}
+	g.cur[g.CursorRow][g.CursorCol] = Cell{Rune: r, Fg: fg, Bg: bg, Attr: attr, Link: link}
 	g.CursorCol++
 }
 
