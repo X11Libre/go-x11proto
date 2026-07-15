@@ -161,7 +161,9 @@ func (t *Term) handleButtonPress(e *events.ButtonPressEvent) {
 		_ = t.Draw()
 	case 2: // middle: paste PRIMARY
 		if t.primary != nil {
-			_, _ = t.primary.RequestText()
+			// RequestText is synchronous (SendAndWait); run it off the
+			// event-loop goroutine so the reply wait can't stall repaints.
+			go func() { _, _ = t.primary.RequestText() }()
 		}
 	}
 }
@@ -175,9 +177,27 @@ func (t *Term) handleButtonRelease(e *events.ButtonReleaseEvent) {
 		return
 	}
 	t.selDragging = false
-	if e.Key == 1 && t.selActive && t.primary != nil {
+	if e.Key == 1 && t.selActive {
 		if text := t.selectedText(); text != "" {
-			_ = t.primary.Own(text)
+			// A drag selection takes both PRIMARY (for middle-click paste,
+			// the X11 convention) and CLIPBOARD (for Ctrl+V / Shift+Ins in
+			// GTK/Qt apps) so the text lands wherever the user pastes.
+			//
+			// Own() issues a synchronous GetSelectionOwner (SendAndWait); run
+			// it off the event-loop goroutine so a slow/stalled selection
+			// reply can never block repaints (which would otherwise freeze
+			// the whole terminal after the first mark).
+			go func() {
+				if t.primary != nil {
+					_ = t.primary.Own(text)
+				}
+				if t.clip != nil {
+					_ = t.clip.Own(text)
+				}
+			}()
+			if t.OnMark != nil {
+				t.OnMark(text)
+			}
 		} else {
 			t.selActive = false
 		}

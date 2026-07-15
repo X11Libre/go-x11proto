@@ -1,6 +1,7 @@
 package term
 
 import (
+	"log"
 	"sync"
 
 	"encoding/base64"
@@ -66,6 +67,10 @@ type Term struct {
 	OnHyperlink func(params, uri string)
 	OnNotify    func(message string)
 	OnOSC777    func(payload string)
+	// OnMark, if set, is called with the text the user just selected with a
+	// mouse drag (after the Term takes PRIMARY/CLIPBOARD ownership of it), so
+	// an embedding program can log or forward it.
+	OnMark func(text string)
 
 	// oscPriPending / oscCBPending are the per-selection FIFOs of OSC 52
 	// selection names (e.g. "p"/"c") whose contents an application has
@@ -82,6 +87,17 @@ type Term struct {
 	aaPic    *tk_render.Picture
 	aaFmt    tk_render.PICTFORMAT
 	aaDepth  base.CARD8
+
+	// gcBack is the offscreen pixmap the core-font (GC) draw path renders a
+	// full frame into before a single CopyArea blits it onto the window —
+	// the GC counterpart of aaBack. Without it every Draw would ClearArea the
+	// visible window (a white flash on each redraw) and a resize/expose could
+	// leave the newly revealed area blank; the backbuffer guarantees a
+	// complete frame is shown in one atomic blit.
+	gcBack     *tk_core.Pixmap
+	gcBackDraw tk_core.Drawable
+	gcBackW    base.CARD16
+	gcBackH    base.CARD16
 
 	// aaBack is an offscreen backbuffer drawAA renders into, blitted onto
 	// aaPic in one shot at the end — without it, every Fill/Composite call
@@ -206,6 +222,11 @@ func (t *Term) initX() error {
 	}
 	t.primary = primary
 	primary.OnPaste = func(s string) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("term: recovered from PRIMARY OnPaste panic: %v", r)
+			}
+		}()
 		// An OSC 52 ; sel ; ? query in flight takes priority: its answer is
 		// the selection text written back to the PTY, not pasted as keystrokes.
 		t.oscClipMu.Lock()
@@ -231,6 +252,11 @@ func (t *Term) initX() error {
 	}
 	t.clip = clip
 	clip.OnPaste = func(s string) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("term: recovered from CLIPBOARD OnPaste panic: %v", r)
+			}
+		}()
 		// Only OSC 52 CLIPBOARD queries are answered here; the terminal has
 		// no other use for inbound CLIPBOARD pastes.
 		t.oscClipMu.Lock()
@@ -303,6 +329,11 @@ func (t *Term) Detach() error {
 	if t.gc != nil {
 		_ = t.gc.Free()
 		t.gc = nil
+	}
+	if t.gcBack != nil {
+		_ = t.gcBack.Free()
+		t.gcBack = nil
+		t.gcBackDraw = tk_core.Drawable{}
 	}
 	if t.clipWin != 0 {
 		// The clipboard offscreen window is destroyed by the server
@@ -595,7 +626,17 @@ func (t *Term) RunLoop(conn *core.X11Conn) {
 			if !ok {
 				return
 			}
-			conn.DeliverWindowEvent(ev)
+			// A panic in event handling (e.g. a selection RPC or a bad
+			// event) must never take down the whole loop — that would stop
+			// every redraw. Recover, log, and keep looping.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("term: recovered from event handler panic: %v", r)
+					}
+				}()
+				conn.DeliverWindowEvent(ev)
+			}()
 		case <-t.dirty:
 			_ = t.Draw()
 		}
@@ -642,10 +683,10 @@ func (t *Term) ownSelection(sel, text string) {
 		wantClip = true // bare numeric selectors target CLIPBOARD
 	}
 	if wantPrimary && t.primary != nil {
-		_ = t.primary.Own(text)
+		go func() { _ = t.primary.Own(text) }()
 	}
 	if wantClip && t.clip != nil {
-		_ = t.clip.Own(text)
+		go func() { _ = t.clip.Own(text) }()
 	}
 }
 
@@ -688,6 +729,11 @@ func (t *Term) Draw() error {
 	if t.gc == nil {
 		return nil
 	}
+	if err := t.ensureGCBackBuffer(); err != nil {
+		return err
+	}
+	back := t.gcBackDraw
+
 	t.mu.Lock()
 	rows, cols := t.grid.Rows, t.grid.Cols
 	live := make([][]Cell, rows)
@@ -701,35 +747,93 @@ func (t *Term) Draw() error {
 	cells := t.visibleRows(live)
 	t.mu.Unlock()
 
-	if err := t.ClearArea(0, 0, 0, 0, false); err != nil {
+	// Clear the whole backbuffer to the default background (isBg selects the
+	// same monochrome fallback the default cell background resolves to, so the
+	// uncleared remainder — the strip right of the last column and below the
+	// last row — matches the content instead of showing through black).
+	if err := t.gc.SetForeground(t.resolver.Pixel(Color{}, true)); err != nil {
+		return err
+	}
+	if err := back.FillRect(t.gc.XID, 0, 0, base.CARD16(t.W), base.CARD16(t.H)); err != nil {
 		return err
 	}
 	h := t.Font.Height()
 	cw := t.Font.RuneWidth(' ')
 
 	var curFont *font.Font = t.Font
-	var curFg base.CARD32
+	var curFg base.CARD32 = ^base.CARD32(0) // sentinel: force first SetForeground
+	var curBg base.CARD32 = ^base.CARD32(0)
 
 	for r := 0; r < rows; r++ {
 		row := cells[r]
 		y := base.INT16(r * h)
-		c := 0
-		for c < cols {
-			cell := row[c]
-			start := c
-			for c < cols && sameStyle(row[c], cell) {
-				c++
+		if !t.selActive {
+			// Fast path: batch same-style runs.
+			c := 0
+			for c < cols {
+				cell := row[c]
+				start := c
+				for c < cols && sameStyle(row[c], cell) {
+					c++
+				}
+				seg := cellsText(row[start:c])
+				f, fg, bg := t.styleFor(cell)
+				if f != curFont {
+					if err := f.SetOn(t.gc); err != nil {
+						return err
+					}
+					curFont = f
+				}
+				if bg != curBg {
+					if err := t.gc.SetBackground(bg); err != nil {
+						return err
+					}
+					curBg = bg
+				}
+				if fg != curFg {
+					if err := t.gc.SetForeground(fg); err != nil {
+						return err
+					}
+					curFg = fg
+				}
+				x := base.INT16(start * cw)
+				// DrawTextBG already adds f.Ascent internally to convert the
+				// top-left y it expects into the baseline ImageText8 needs — do
+				// not add it again here (that bug drew every row one Ascent too
+				// low, making the cursor block look like it sat a line above
+				// the glyph it belonged to).
+				if err := f.DrawTextBG(back, t.gc.XID, x, y, seg); err != nil {
+					return err
+				}
+				if cell.Attr&AttrUnderline != 0 {
+					if err := back.FillRect(t.gc.XID, x, y+base.INT16(h-1), base.CARD16((c-start)*cw), 1); err != nil {
+						return err
+					}
+				}
 			}
-			seg := cellsText(row[start:c])
+			continue
+		}
+		// Selection active: draw per-cell so reverse-video follows the exact
+		// selected range. Run batching would over-/under-highlight at the
+		// selection edges and mis-invert colored runs (e.g. a whole colored
+		// prompt path instead of just the dragged part).
+		for c := 0; c < cols; c++ {
+			cell := row[c]
 			f, fg, bg := t.styleFor(cell)
+			if t.selectedAt(r, c) {
+				fg, bg = bg, fg
+			}
 			if f != curFont {
 				if err := f.SetOn(t.gc); err != nil {
 					return err
 				}
 				curFont = f
 			}
-			if err := t.gc.SetBackground(bg); err != nil {
-				return err
+			if bg != curBg {
+				if err := t.gc.SetBackground(bg); err != nil {
+					return err
+				}
+				curBg = bg
 			}
 			if fg != curFg {
 				if err := t.gc.SetForeground(fg); err != nil {
@@ -737,17 +841,12 @@ func (t *Term) Draw() error {
 				}
 				curFg = fg
 			}
-			x := base.INT16(start * cw)
-			// DrawTextBG already adds f.Ascent internally to convert the
-			// top-left y it expects into the baseline ImageText8 needs — do
-			// not add it again here (that bug drew every row one Ascent too
-			// low, making the cursor block look like it sat a line above
-			// the glyph it belonged to).
-			if err := f.DrawTextBG(t.Drawable, t.gc.XID, x, y, seg); err != nil {
+			x := base.INT16(c * cw)
+			if err := f.DrawTextBG(back, t.gc.XID, x, y, cellsText([]Cell{cell})); err != nil {
 				return err
 			}
 			if cell.Attr&AttrUnderline != 0 {
-				if err := t.FillRect(t.gc.XID, x, y+base.INT16(h-1), base.CARD16((c-start)*cw), 1); err != nil {
+				if err := back.FillRect(t.gc.XID, x, y+base.INT16(h-1), base.CARD16(cw), 1); err != nil {
 					return err
 				}
 			}
@@ -759,11 +858,13 @@ func (t *Term) Draw() error {
 			return err
 		}
 		x, y := base.INT16(curCol*cw), base.INT16(curRow*h)
-		if err := t.FillRect(t.gc.XID, x, y, base.CARD16(cw), base.CARD16(h)); err != nil {
+		if err := back.FillRect(t.gc.XID, x, y, base.CARD16(cw), base.CARD16(h)); err != nil {
 			return err
 		}
 	}
-	return nil
+
+	// Blit the finished frame onto the visible window in a single CopyArea.
+	return back.CopyArea(t.Drawable.XID, t.gc.XID, 0, 0, 0, 0, base.CARD16(t.W), base.CARD16(t.H))
 }
 
 func sameStyle(a, b Cell) bool {
@@ -813,28 +914,57 @@ func (t *Term) drawAA() error {
 	for r := 0; r < rows; r++ {
 		row := cells[r]
 		y := r * h
-		c := 0
-		for c < cols {
-			cell := row[c]
-			start := c
-			for c < cols && sameStyle(row[c], cell) {
-				c++
+		if !t.selActive {
+			// Fast path: batch same-style runs.
+			c := 0
+			for c < cols {
+				cell := row[c]
+				start := c
+				for c < cols && sameStyle(row[c], cell) {
+					c++
+				}
+				fg, bg := t.styleForAA(cell)
+				x := start * cw
+				width := (c - start) * cw
+				if bg != t.BgRGB {
+					if err := back.Fill(tk_render.OpOver, rgbColor(bg),
+						[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y), Width: base.CARD16(width), Height: base.CARD16(h)}}); err != nil {
+						return err
+					}
+				}
+				if _, err := t.AAFace.DrawString(back, x, y+ascent, runesText(row[start:c]), fg); err != nil {
+					return err
+				}
+				if cell.Attr&AttrUnderline != 0 {
+					if err := back.Fill(tk_render.OpOver, rgbColor(fg),
+						[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y + h - 1), Width: base.CARD16(width), Height: 1}}); err != nil {
+						return err
+					}
+				}
 			}
+			continue
+		}
+		// Selection active: draw per-cell so reverse-video follows the exact
+		// selected range (run batching would mis-highlight colored runs).
+		for c := 0; c < cols; c++ {
+			cell := row[c]
 			fg, bg := t.styleForAA(cell)
-			x := start * cw
-			width := (c - start) * cw
+			if t.selectedAt(r, c) {
+				fg, bg = bg, fg
+			}
+			x := c * cw
 			if bg != t.BgRGB {
 				if err := back.Fill(tk_render.OpOver, rgbColor(bg),
-					[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y), Width: base.CARD16(width), Height: base.CARD16(h)}}); err != nil {
+					[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y), Width: base.CARD16(cw), Height: base.CARD16(h)}}); err != nil {
 					return err
 				}
 			}
-			if _, err := t.AAFace.DrawString(back, x, y+ascent, runesText(row[start:c]), fg); err != nil {
+			if _, err := t.AAFace.DrawString(back, x, y+ascent, runesText([]Cell{cell}), fg); err != nil {
 				return err
 			}
 			if cell.Attr&AttrUnderline != 0 {
 				if err := back.Fill(tk_render.OpOver, rgbColor(fg),
-					[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y + h - 1), Width: base.CARD16(width), Height: 1}}); err != nil {
+					[]base.Rectangle{{X: base.INT16(x), Y: base.INT16(y + h - 1), Width: base.CARD16(cw), Height: 1}}); err != nil {
 					return err
 				}
 			}
@@ -879,6 +1009,34 @@ func (t *Term) ensureAABackBuffer() error {
 		return err
 	}
 	t.aaBackPix, t.aaBackPic, t.aaBackW, t.aaBackH = pix, pic, w, h
+	return nil
+}
+
+// ensureGCBackBuffer (re)creates the offscreen pixmap the core-font (GC) draw
+// path renders a full frame into when the window's size has changed (or on
+// first use), so Draw always has a same-size backbuffer to draw into before a
+// single CopyArea makes it visible — without this, every individual Fill/
+// ImageText8 in Draw would land directly on the visible window, and the
+// half-drawn frame (background cleared, glyphs not yet drawn) would be visible
+// for a moment: flicker on every redraw, worst on every keypress since each
+// one triggers a full repaint. It mirrors ensureAABackBuffer.
+func (t *Term) ensureGCBackBuffer() error {
+	w, h := t.W, t.H
+	if t.gcBack != nil && t.gcBackW == base.CARD16(w) && t.gcBackH == base.CARD16(h) {
+		return nil
+	}
+	if t.gcBack != nil {
+		_ = t.gcBack.Free()
+	}
+	geom, err := t.Window.GetGeometry()
+	if err != nil {
+		return err
+	}
+	pix, err := t.Conn.CreatePixmap(geom.Depth, base.DRAWABLE(t.Conn.X11Conn.DefaultRoot()), w, h)
+	if err != nil {
+		return err
+	}
+	t.gcBack, t.gcBackDraw, t.gcBackW, t.gcBackH = pix, tk_core.Drawable{Conn: t.Conn, XID: pix.Drawable.XID}, base.CARD16(w), base.CARD16(h)
 	return nil
 }
 
