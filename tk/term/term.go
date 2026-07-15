@@ -3,6 +3,8 @@ package term
 import (
 	"sync"
 
+	"encoding/base64"
+
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
@@ -55,6 +57,14 @@ type Term struct {
 
 	OnTitle func(string)
 	OnExit  func(error)
+
+	// OSC 52/8/9/777 handlers, mirroring the parser callbacks. OnClipboard
+	// receives the raw (base64) payload; data == "?" means the application
+	// requested the current selection. OnHyperlink's uri == "" ends a link.
+	OnClipboard func(selection, data string)
+	OnHyperlink func(params, uri string)
+	OnNotify    func(message string)
+	OnOSC777    func(payload string)
 
 	gc       *tk_core.GC
 	resolver pixelResolver
@@ -137,11 +147,7 @@ func (t *Term) Init() error {
 				_, _ = t.pty.Master.Write(b)
 			}
 		}
-		t.parser.SetTitle = func(s string) {
-			if t.OnTitle != nil {
-				t.OnTitle(s)
-			}
-		}
+		t.wireOSC()
 	}
 	return nil
 }
@@ -324,12 +330,49 @@ func (t *Term) InitTerm() error {
 			_, _ = t.pty.Master.Write(b)
 		}
 	}
+	t.wireOSC()
+	return nil
+}
+
+// wireOSC hooks the parser's OSC callbacks up to the Term's On* handlers and,
+// for OSC 52, to the X11 PRIMARY selection. Shared by Init and Attach so both
+// code paths configure the same behaviour.
+func (t *Term) wireOSC() {
 	t.parser.SetTitle = func(s string) {
 		if t.OnTitle != nil {
 			t.OnTitle(s)
 		}
 	}
-	return nil
+	t.parser.SetClipboard = func(sel, data string) {
+		if t.OnClipboard != nil {
+			t.OnClipboard(sel, data)
+		}
+		if data != "?" && t.primary != nil {
+			if dec, err := base64.StdEncoding.DecodeString(data); err == nil {
+				_ = t.primary.Own(string(dec))
+			}
+		}
+	}
+	t.parser.RequestClipboard = func(sel string) {
+		if t.OnClipboard != nil {
+			t.OnClipboard(sel, "?")
+		}
+	}
+	t.parser.SetHyperlink = func(params, uri string) {
+		if t.OnHyperlink != nil {
+			t.OnHyperlink(params, uri)
+		}
+	}
+	t.parser.Notify = func(msg string) {
+		if t.OnNotify != nil {
+			t.OnNotify(msg)
+		}
+	}
+	t.parser.OSC777 = func(payload string) {
+		if t.OnOSC777 != nil {
+			t.OnOSC777(payload)
+		}
+	}
 }
 
 func max1(v int) int {
