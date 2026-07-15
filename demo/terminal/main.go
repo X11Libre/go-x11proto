@@ -17,8 +17,14 @@ import (
 	"github.com/X11Libre/go-x11proto/proto"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	"github.com/X11Libre/go-x11proto/tk/font"
+	"github.com/X11Libre/go-x11proto/tk/font/ttf"
+	tk_render "github.com/X11Libre/go-x11proto/tk/render"
 	"github.com/X11Libre/go-x11proto/tk/term"
 )
+
+// ttfPath is a system-installed monospace font. A real terminal would use
+// fontconfig discovery instead of a hardcoded path.
+const ttfPath = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 
 func main() {
 	conn, err := proto.DialBE("")
@@ -29,11 +35,22 @@ func main() {
 
 	tk := tk_core.MakeTkConn(conn)
 
-	f, err := font.Open(conn, "fixed")
+	// Antialiased TrueType text (ttf) renders Unicode and box-drawing glyphs
+	// correctly — the core X bitmap "fixed" font leaves gaps between vertical
+	// bars and other glyphs. Fall back to the core font if RENDER or the TTF
+	// file is unavailable.
+	rdr, err := tk_render.Open(&tk)
 	if err != nil {
-		log.Fatalf("open font: %v", err)
+		log.Printf("RENDER unavailable, using core font: %v", err)
 	}
-	defer f.Close(conn)
+	var face *ttf.Face
+	if rdr != nil {
+		face, err = ttf.Open(&tk, rdr, ttfPath, 13, 96)
+		if err != nil {
+			log.Printf("open TrueType face %q failed, using core font: %v", ttfPath, err)
+			face = nil
+		}
+	}
 
 	t := &term.Term{
 		Window: tk_core.Window{
@@ -44,8 +61,13 @@ func main() {
 			Y:        50,
 			W:        800,
 			H:        480,
+			// Matches FgRGB/BgRGB below: without this, the X server paints
+			// its own default (white) background for the window before the
+			// first Draw() ever runs — a white flash on startup and on
+			// every resize, even with double buffering.
+			SetBackPixel: true,
+			BackPixel:    conn.DefaultBlackPixel(),
 		},
-		Font: f,
 		Type: term.XTerm256Color,
 		OnTitle: func(s string) {
 			// A real title update would call an X11 SetWMName-equivalent on
@@ -73,6 +95,9 @@ func main() {
 				log.Printf("clipboard set: %s (bad base64: %v)", name, err)
 			}
 		},
+		OnMark: func(text string) {
+			log.Printf("mark: %d bytes", len(text))
+		},
 		OnHyperlink: func(params, uri string) {
 			if uri == "" {
 				log.Printf("hyperlink end")
@@ -90,6 +115,20 @@ func main() {
 			os.Exit(0)
 		},
 	}
+	if face != nil {
+		t.AAFace = face
+		t.AARender = rdr
+		t.FgRGB = [3]byte{0xff, 0xff, 0xff}
+		t.BgRGB = [3]byte{0x00, 0x00, 0x00}
+	} else {
+		f, err := font.Open(conn, "fixed")
+		if err != nil {
+			log.Fatalf("open font: %v", err)
+		}
+		defer f.Close(conn)
+		t.Font = f
+	}
+
 	if len(os.Args) > 1 {
 		t.Shell = os.Args[1]
 	}
