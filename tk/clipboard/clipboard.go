@@ -60,16 +60,15 @@ func New(conn *core.X11Conn, win base.WINDOW, selection string) (*Clipboard, err
 }
 
 // Own takes ownership of the selection and stores text to serve on request.
+//
+// It does NOT verify the takeover with a GetSelectionOwner round-trip: that
+// request's reply is matched on the connection's sequence number, which is
+// unreliable here (and a mismatch would make Own return early with c.text
+// left empty — serving a blank selection). SetSelectionOwner is sufficient:
+// if it succeeds the server routes future requests to us.
 func (c *Clipboard) Own(text string) error {
 	if err := rpc.SetSelectionOwner(c.conn, c.win, c.sel, 0); err != nil {
 		return err
-	}
-	owner, err := rpc.GetSelectionOwner(c.conn, c.sel)
-	if err != nil {
-		return err
-	}
-	if owner != c.win {
-		return fmt.Errorf("clipboard: failed to acquire selection")
 	}
 	c.text = text
 	c.owned = true
@@ -129,16 +128,13 @@ func (c *Clipboard) Serve(req *events.SelectionRequestEvent) error {
 
 // RequestText asks the current owner to convert the selection to UTF8_STRING.
 // The result arrives asynchronously as a SelectionNotify; deliver events to
-// HandleX11WindowEvent and set OnPaste to receive it. Returns false if there is
-// no owner.
+// HandleX11WindowEvent and set OnPaste to receive it.
+//
+// It does not pre-check GetSelectionOwner: an absent owner simply yields a
+// SelectionNotify with property None, which HandleX11WindowEvent reports as an
+// empty paste. Skipping the round-trip avoids a fragile sequence-matched reply
+// (whose mismatch would otherwise make the whole request fail).
 func (c *Clipboard) RequestText() (bool, error) {
-	owner, err := rpc.GetSelectionOwner(c.conn, c.sel)
-	if err != nil {
-		return false, err
-	}
-	if owner == 0 {
-		return false, nil
-	}
 	return true, rpc.ConvertSelection(c.conn, c.win, c.sel, c.utf8, c.prop, 0)
 }
 
