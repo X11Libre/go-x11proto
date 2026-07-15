@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"encoding/base64"
+	"strings"
 
 	"github.com/X11Libre/go-x11proto/proto/base"
 	"github.com/X11Libre/go-x11proto/proto/core"
@@ -66,13 +67,15 @@ type Term struct {
 	OnNotify    func(message string)
 	OnOSC777    func(payload string)
 
-	// oscClipPending is the FIFO of OSC 52 selection names (e.g. "c"/"p")
-	// whose contents an application has requested via OSC 52 ; sel ; ?. As
-	// each request's SelectionNotify arrives (via primary.OnPaste in the
-	// event loop), the next name is popped and the text is written back to
-	// the PTY as OSC 52 ; sel ; <base64>. Guarded by oscClipMu.
-	oscClipPending []string
-	oscClipMu      sync.Mutex
+	// oscPriPending / oscCBPending are the per-selection FIFOs of OSC 52
+	// selection names (e.g. "p"/"c") whose contents an application has
+	// requested via OSC 52 ; sel ; ?. As each request's SelectionNotify
+	// arrives (via the matching clipboard's OnPaste in the event loop), the
+	// next name is popped and the text is written back to the PTY as
+	// OSC 52 ; sel ; <base64>. Guarded by oscClipMu.
+	oscPriPending []string
+	oscCBPending  []string
+	oscClipMu     sync.Mutex
 
 	gc       *tk_core.GC
 	resolver pixelResolver
@@ -107,6 +110,12 @@ type Term struct {
 	// follow-up, not implemented here.
 	clipWin base.WINDOW
 	primary *clipboard.Clipboard
+
+	// clip is the X CLIPBOARD selection (distinct from PRIMARY), used by OSC
+	// 52 "c". It owns its own offscreen window so the two selections have
+	// independent lifetimes.
+	clipCBWin base.WINDOW
+	clip      *clipboard.Clipboard
 
 	selActive            bool
 	selDragging          bool // true while the left button is held for a selection drag
@@ -200,9 +209,9 @@ func (t *Term) initX() error {
 		// An OSC 52 ; sel ; ? query in flight takes priority: its answer is
 		// the selection text written back to the PTY, not pasted as keystrokes.
 		t.oscClipMu.Lock()
-		if n := len(t.oscClipPending); n > 0 {
-			sel := t.oscClipPending[0]
-			t.oscClipPending = t.oscClipPending[1:]
+		if n := len(t.oscPriPending); n > 0 {
+			sel := t.oscPriPending[0]
+			t.oscPriPending = t.oscPriPending[1:]
 			t.oscClipMu.Unlock()
 			t.writeOSC52(sel, s)
 			return
@@ -210,6 +219,31 @@ func (t *Term) initX() error {
 		t.oscClipMu.Unlock()
 		t.Paste(s)
 	}
+
+	clipCBWin, err := rpc.CreateWindow1(t.Conn.X11Conn, t.Conn.X11Conn.DefaultRoot(), -10, -10, 1, 1, clipboard.EventMask)
+	if err != nil {
+		return err
+	}
+	t.clipCBWin = clipCBWin
+	clip, err := clipboard.New(t.Conn.X11Conn, clipCBWin, "CLIPBOARD")
+	if err != nil {
+		return err
+	}
+	t.clip = clip
+	clip.OnPaste = func(s string) {
+		// Only OSC 52 CLIPBOARD queries are answered here; the terminal has
+		// no other use for inbound CLIPBOARD pastes.
+		t.oscClipMu.Lock()
+		if n := len(t.oscCBPending); n > 0 {
+			sel := t.oscCBPending[0]
+			t.oscCBPending = t.oscCBPending[1:]
+			t.oscClipMu.Unlock()
+			t.writeOSC52(sel, s)
+			return
+		}
+		t.oscClipMu.Unlock()
+	}
+	t.Conn.X11Conn.RegisterWindowHandler(clipCBWin, clip)
 	t.Conn.X11Conn.RegisterWindowHandler(clipWin, primary)
 
 	t.cols, t.rows = t.cellSize()
@@ -368,38 +402,35 @@ func (t *Term) wireOSC() {
 		if t.OnClipboard != nil {
 			t.OnClipboard(sel, data)
 		}
-		if data != "?" && t.primary != nil {
-			if dec, err := base64.StdEncoding.DecodeString(data); err == nil {
-				_ = t.primary.Own(string(dec))
-			}
+		if data == "?" || t.primary == nil || t.clip == nil {
+			return
+		}
+		if dec, err := base64.StdEncoding.DecodeString(data); err == nil {
+			t.ownSelection(sel, string(dec))
 		}
 	}
 	t.parser.RequestClipboard = func(sel string) {
 		if t.OnClipboard != nil {
 			t.OnClipboard(sel, "?")
 		}
-		if t.primary == nil {
+		if t.primary == nil || t.clip == nil {
 			return
 		}
-		// Queue the selection name so the async SelectionNotify (delivered
-		// through primary.OnPaste in the event loop) knows which OSC 52
-		// response to write. RequestText returns false only when there is no
-		// owner at all, in which case respond immediately with an empty value.
-		t.oscClipMu.Lock()
-		t.oscClipPending = append(t.oscClipPending, sel)
-		t.oscClipMu.Unlock()
-		ok, err := t.primary.RequestText()
-		if err != nil {
-			t.oscClipMu.Lock()
-			t.oscClipPending = t.oscClipPending[:len(t.oscClipPending)-1]
-			t.oscClipMu.Unlock()
-			return
+		// Route the query to the right X selection(s) by the Pc selector:
+		// 'p' -> PRIMARY, 'c' -> CLIPBOARD, 's' -> both, bare/numeric -> CLIPBOARD.
+		wantPrimary := strings.ContainsRune(sel, 'p') || strings.ContainsRune(sel, 'P')
+		wantClip := strings.ContainsRune(sel, 'c') || strings.ContainsRune(sel, 'C')
+		if strings.ContainsRune(sel, 's') || strings.ContainsRune(sel, 'S') {
+			wantPrimary, wantClip = true, true
 		}
-		if !ok {
-			t.oscClipMu.Lock()
-			t.oscClipPending = t.oscClipPending[:len(t.oscClipPending)-1]
-			t.oscClipMu.Unlock()
-			t.writeOSC52(sel, "")
+		if !wantPrimary && !wantClip {
+			wantClip = true // default a bare/numeric query to CLIPBOARD
+		}
+		if wantPrimary {
+			t.requestOSCClip(sel, t.primary, &t.oscPriPending)
+		}
+		if wantClip {
+			t.requestOSCClip(sel, t.clip, &t.oscCBPending)
 		}
 	}
 	t.parser.SetHyperlink = func(params, uri string) {
@@ -592,6 +623,54 @@ func (t *Term) writeOSC52(sel, data string) {
 	}
 	resp := "\x1b]52;" + sel + ";" + base64.StdEncoding.EncodeToString([]byte(data)) + "\x07"
 	_, _ = t.pty.Master.Write([]byte(resp))
+}
+
+// ownSelection takes ownership of the appropriate X selection(s) for an OSC 52
+// set, based on the Pc selector: 'p' -> PRIMARY, 'c' -> CLIPBOARD, 's' -> both,
+// a bare/numeric selector -> CLIPBOARD.
+func (t *Term) ownSelection(sel, text string) {
+	wantPrimary := strings.ContainsRune(sel, 'p') || strings.ContainsRune(sel, 'P')
+	wantClip := strings.ContainsRune(sel, 'c') || strings.ContainsRune(sel, 'C')
+	if strings.ContainsRune(sel, 's') || strings.ContainsRune(sel, 'S') {
+		wantPrimary, wantClip = true, true
+	}
+	if !wantPrimary && !wantClip {
+		wantClip = true // bare numeric selectors target CLIPBOARD
+	}
+	if wantPrimary && t.primary != nil {
+		_ = t.primary.Own(text)
+	}
+	if wantClip && t.clip != nil {
+		_ = t.clip.Own(text)
+	}
+}
+
+// requestOSCClip issues an async OSC 52 selection query against cb, queueing
+// sel so the matching clipboard's OnPaste knows which OSC 52 response to write.
+// If there is no owner (or the request fails) it responds immediately with an
+// empty value and drops the queued entry.
+func (t *Term) requestOSCClip(sel string, cb *clipboard.Clipboard, q *[]string) {
+	t.oscClipMu.Lock()
+	*q = append(*q, sel)
+	t.oscClipMu.Unlock()
+	ok, err := cb.RequestText()
+	if err != nil {
+		t.popPending(q)
+		return
+	}
+	if !ok {
+		t.popPending(q)
+		t.writeOSC52(sel, "")
+	}
+}
+
+// popPending removes the oldest queued OSC 52 query name from q.
+func (t *Term) popPending(q *[]string) {
+	t.oscClipMu.Lock()
+	if len(*q) > 0 {
+		*q = (*q)[1:]
+	}
+	t.oscClipMu.Unlock()
 }
 
 // Draw repaints the whole grid, batching same-style runs per row so the GC's

@@ -54,14 +54,23 @@ func main() {
 			log.Printf("title: %s", s)
 		},
 		OnClipboard: func(sel, data string) {
+			name := sel
+			switch {
+			case sel == "c":
+				name = "CLIPBOARD"
+			case sel == "p" || sel == "P" || sel == "0":
+				name = "PRIMARY"
+			case sel == "s" || sel == "S":
+				name = "PRIMARY+CLIPBOARD"
+			}
 			if data == "?" {
-				log.Printf("clipboard query: sel=%s", sel)
+				log.Printf("clipboard query: %s", name)
 				return
 			}
 			if dec, err := base64.StdEncoding.DecodeString(data); err == nil {
-				log.Printf("clipboard set: sel=%s data=%q", sel, string(dec))
+				log.Printf("clipboard set: %s data=%q", name, string(dec))
 			} else {
-				log.Printf("clipboard set: sel=%s (bad base64: %v)", sel, err)
+				log.Printf("clipboard set: %s (bad base64: %v)", name, err)
 			}
 		},
 		OnHyperlink: func(params, uri string) {
