@@ -40,6 +40,12 @@ type Face struct {
 	rdr  *tk_render.Render
 	face font.Face
 
+	// parsed/dpi are kept so Resize can re-rasterize at a new point size
+	// without re-reading the font file.
+	parsed *opentype.Font
+	size   float64
+	dpi    float64
+
 	a8   tk_render.PICTFORMAT
 	argb tk_render.PICTFORMAT
 	root base.DRAWABLE
@@ -109,10 +115,42 @@ func Open(conn *tk_core.TkConn, rdr *tk_render.Render, path string, size, dpi fl
 
 	return &Face{
 		conn: conn, rdr: rdr, face: face,
+		parsed: parsed, size: size, dpi: dpi,
 		a8: a8, argb: argb, root: root, gc8: gc8,
 		glyphs:  make(map[rune]*glyphEntry),
 		sources: make(map[base.CARD32]*colorSource),
 	}, nil
+}
+
+// Size returns the current point size the face rasterizes at.
+func (f *Face) Size() float64 { return f.size }
+
+// Resize re-rasterizes the font at a new point size, freeing the cached
+// glyph masks (which are size-specific) while keeping the colour sources.
+// It returns an error only if the underlying font cannot be rebuilt; the
+// previous size remains in effect then.
+func (f *Face) Resize(size float64) error {
+	for _, ge := range f.glyphs {
+		if ge.pic != nil {
+			_ = ge.pic.Free()
+		}
+		if ge.pixmap != nil {
+			_ = ge.pixmap.Free()
+		}
+	}
+	f.glyphs = make(map[rune]*glyphEntry)
+
+	nf, err := opentype.NewFace(f.parsed, &opentype.FaceOptions{
+		Size:    size,
+		DPI:     f.dpi,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		return err
+	}
+	f.face = nf
+	f.size = size
+	return nil
 }
 
 // Height returns the recommended line height in whole pixels.

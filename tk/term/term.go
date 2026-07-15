@@ -1,6 +1,7 @@
 package term
 
 import (
+	"fmt"
 	"log"
 	"sync"
 
@@ -584,6 +585,38 @@ func (t *Term) ScrollBy(delta int) {
 	cur := t.scrollOffset
 	t.mu.Unlock()
 	t.ScrollTo(cur + delta)
+}
+
+// SetFontSize rescales the antialiased font (zoom) to px points, keeping the
+// window size fixed so more or fewer cells fit — like xterm's Ctrl +/-
+// zoom. The grid, PTY, and next draw are updated to the new cell metrics.
+// It is a no-op (returning an error) when the terminal is using the core X
+// font, which is not freely scalable.
+func (t *Term) SetFontSize(px float64) error {
+	if t.AAFace == nil {
+		return fmt.Errorf("term: SetFontSize requires an AA face")
+	}
+	if px < 6 {
+		px = 6
+	}
+	if px > 72 {
+		px = 72
+	}
+	if err := t.AAFace.Resize(px); err != nil {
+		return err
+	}
+	t.mu.Lock()
+	cols, rows := t.cellSize()
+	changed := cols != t.cols || rows != t.rows
+	if changed {
+		t.cols, t.rows = cols, rows
+		t.grid.Resize(rows, cols)
+	}
+	t.mu.Unlock()
+	if changed && t.pty != nil {
+		_ = t.pty.Resize(rows, cols)
+	}
+	return t.Draw()
 }
 
 // visibleRows returns exactly t.rows row-slices to render: live unmodified
@@ -1236,6 +1269,18 @@ func (t *Term) handleKey(e *events.KeyPressEvent) {
 		}
 	}
 	k := t.Keymap.Lookup(e.Key, e.State)
+	// Ctrl + '+'/'= zooms in, Ctrl + '-' zooms out (font rescale; window
+	// stays fixed). Intercept before the key reaches the PTY.
+	if k.Ctrl && t.AAFace != nil {
+		switch k.Rune {
+		case '+', '=':
+			_ = t.SetFontSize(t.AAFace.Size() + 2)
+			return
+		case '-':
+			_ = t.SetFontSize(t.AAFace.Size() - 2)
+			return
+		}
+	}
 	t.mu.Lock()
 	appCursor := t.parser.Modes.AppCursor
 	t.mu.Unlock()
