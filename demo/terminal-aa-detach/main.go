@@ -27,14 +27,15 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/X11Libre/go-x11proto/proto"
 	"github.com/X11Libre/go-x11proto/proto/base"
 	proto_core "github.com/X11Libre/go-x11proto/proto/core"
-	"github.com/X11Libre/go-x11proto/proto/core/events"
-	"github.com/X11Libre/go-x11proto/proto/rpc"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	"github.com/X11Libre/go-x11proto/tk/font/ttf"
 	tk_render "github.com/X11Libre/go-x11proto/tk/render"
@@ -52,8 +53,19 @@ type app struct {
 
 	attached bool
 	cmdCh    chan string
-	sigCh    chan os.Signal
 	ctrlF    *os.File // control pipe for responses
+
+	// ctrlMu serialises attach/detach against the event loop's use of the X
+	// connection. Signal/pipe handling runs in its own goroutines (see
+	// ctrlLoop) so a busy X event stream can never starve detach/attach —
+	// previously the single select in eventLoop let evCh win every round and
+	// SIGUSR1/SIGUSR2/pipe commands were never processed while attached.
+	ctrlMu sync.Mutex
+
+	// attachSeq increments on every successful attach so the event loop can
+	// tell whether a closed evCh belongs to the current connection or to an
+	// already-replaced one (avoids detaching the new conn on a stale EOF).
+	attachSeq int
 
 	// remembered geometry across attach/detach cycles
 	winW, winH base.CARD16
@@ -61,17 +73,17 @@ type app struct {
 }
 
 func main() {
-	log.SetFlags(0)
+	log.SetFlags(log.LstdFlags)
+	log.SetPrefix(fmt.Sprintf("[pid %d] ", os.Getpid()))
+	log.Printf("START args=%v", os.Args)
 
 	a := &app{
 		cmdCh: make(chan string, 8),
-		sigCh: make(chan os.Signal, 1),
 		winW:  800,
 		winH:  480,
 		winX:  50,
 		winY:  50,
 	}
-	signal.Notify(a.sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2)
 
 	if fdStr := os.Getenv("TERM_CTRL_FD"); fdStr != "" {
 		var fd int
@@ -111,14 +123,58 @@ func main() {
 		log.Fatalf("start shell: %v", err)
 	}
 
+	go a.signalLoop()
+	go a.ctrlLoop()
+	// xRunLoop drives the Term's event loop on the *current* X connection.
+	// It is restarted on each attach/detach so it always uses the live conn.
+	go a.xRunLoop()
+
 	if !startDetached {
 		if err := a.doAttach(""); err != nil {
 			log.Fatalf("initial attach: %v", err)
 		}
+		log.Printf("main: initial attach done, attached=%v", a.attached)
 	}
 
-	if err := a.eventLoop(); err != nil {
-		log.Fatalf("run: %v", err)
+	select {} // run forever; control via signals/pipe
+}
+
+// signalLoop runs in a dedicated OS thread so signal delivery is never
+// blocked by the X event loop's (possibly cgo-backed) read in another thread.
+// Some go-x11proto paths block a thread in a C call (e.g. font/render), which
+// can starve Go's default signal-delivery thread; pinning the handler to its
+// own locked thread keeps detach/attach responsive while attached.
+func (a *app) signalLoop() {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2)
+	log.Printf("signalLoop started; Notify registered")
+	for sig := range sigCh {
+		log.Printf("SIGNAL received: %v", sig)
+		switch sig {
+		case syscall.SIGINT, syscall.SIGTERM:
+			os.Exit(0)
+		case syscall.SIGUSR1:
+			log.Printf("SIGUSR1: attached=%v", a.attached)
+			a.ctrlMu.Lock()
+			if a.attached {
+				a.doDetach()
+				log.Printf("SIGUSR1: doDetach done, attached=%v", a.attached)
+			}
+			a.ctrlMu.Unlock()
+		case syscall.SIGUSR2:
+			log.Printf("SIGUSR2: attached=%v", a.attached)
+			a.ctrlMu.Lock()
+			if !a.attached {
+				if err := a.doAttach(""); err != nil {
+					log.Printf("SIGUSR2 attach: %v", err)
+				} else {
+					log.Printf("SIGUSR2 attached ok")
+				}
+			}
+			a.ctrlMu.Unlock()
+		}
 	}
 }
 
@@ -129,58 +185,51 @@ func (a *app) ctrlReader(f *os.File) {
 	}
 }
 
-func (a *app) eventLoop() error {
-	var evCh <-chan events.Event
-	if a.attached {
-		evCh = a.conn.Events()
-	}
-
+// xRunLoop drives the Term's event loop on the current X connection using
+// the library's own term.RunLoop (which correctly combines conn.Events(),
+// DeliverWindowEvent and Dirty-driven redraws). It runs as a long-lived
+// goroutine: while attached it runs RunLoop on the live conn; when the
+// connection dies (RunLoop returns on EOF) it auto-detaches so the shell
+// survives, then waits until the next attach restarts the loop.
+func (a *app) xRunLoop() {
 	for {
-		var dirtyCh <-chan struct{}
-		if a.t != nil {
-			dirtyCh = a.t.Dirty()
+		a.ctrlMu.Lock()
+		attached := a.attached
+		conn := a.conn
+		a.ctrlMu.Unlock()
+		if !attached || conn == nil {
+			// Idle until signalLoop/ctrlLoop flip attached=true (doAttach).
+			time.Sleep(50 * time.Millisecond)
+			continue
 		}
-
-		select {
-		case ev, ok := <-evCh:
-			if !ok {
-				evCh = nil
-				continue
+		// Run the library event loop for this connection. It returns when the
+		// connection closes (user closed window / server disconnected).
+		a.t.RunLoop(conn)
+		// Connection gone: auto-detach and keep the shell alive.
+		a.ctrlMu.Lock()
+		if a.attached {
+			seq := a.attachSeq
+			a.ctrlMu.Unlock()
+			// Only detach if this is still the same connection cycle.
+			a.ctrlMu.Lock()
+			if a.attached && a.attachSeq == seq {
+				a.detachOnDeadConn()
 			}
-			a.conn.DeliverWindowEvent(ev)
-
-		case <-dirtyCh:
-			if a.attached {
-				_ = a.t.Draw()
-			}
-
-		case sig := <-a.sigCh:
-			switch sig {
-			case syscall.SIGINT, syscall.SIGTERM:
-				return nil
-			case syscall.SIGUSR1:
-				if a.attached {
-					a.doDetach()
-					evCh = nil
-				}
-			case syscall.SIGUSR2:
-				if !a.attached {
-					if err := a.doAttach(""); err != nil {
-						log.Printf("SIGUSR2 attach: %v", err)
-					} else {
-						evCh = a.conn.Events()
-					}
-				}
-			}
-
-		case line := <-a.cmdCh:
-			a.handleCmd(line)
-			if a.attached {
-				evCh = a.conn.Events()
-			} else {
-				evCh = nil
-			}
+			a.ctrlMu.Unlock()
+		} else {
+			a.ctrlMu.Unlock()
 		}
+	}
+}
+
+// ctrlLoop owns all attach/detach transitions driven by the control pipe.
+// Signal handling lives in signalLoop (its own locked OS thread) so a busy X
+// event loop can never starve detach/attach.
+func (a *app) ctrlLoop() {
+	for line := range a.cmdCh {
+		a.ctrlMu.Lock()
+		a.handleCmd(line)
+		a.ctrlMu.Unlock()
 	}
 }
 
@@ -230,38 +279,71 @@ func (a *app) doDetach() {
 	if !a.attached {
 		return
 	}
-	// Remember current window geometry before destroying resources.
-	if g, err := a.t.Window.GetGeometry(); err == nil {
-		a.winW = g.Width
-		a.winH = g.Height
-		a.winX = g.X
-		a.winY = g.Y
+	// Best-effort geometry capture; the connection may already be dead (e.g.
+	// the user closed the window), in which case GetGeometry fails and we keep
+	// the last known geometry.
+	if a.conn != nil {
+		if g, err := a.t.Window.GetGeometry(); err == nil {
+			a.winW = g.Width
+			a.winH = g.Height
+			a.winX = g.X
+			a.winY = g.Y
+		}
 	}
-	_ = a.t.Detach()
-	if a.face != nil {
-		a.face.Close()
-		a.face = nil
-	}
-	a.tk = tk_core.TkConn{}
-	a.rdr = nil
-	// Sync: wait for all pending X requests (DestroyWindow etc.) to be
-	// sent/processed before closing the connection.
-	_, _ = rpc.GetGeometry(a.conn, a.conn.DefaultRoot())
-	a.conn.Close()
+	// Detaching and closing may touch a connection that already errored out;
+	// guard so a dead socket cannot panic and kill the shell.
+	func() {
+		defer func() { _ = recover() }()
+		_ = a.t.Detach()
+		if a.face != nil {
+			a.face.Close()
+			a.face = nil
+		}
+		a.tk = tk_core.TkConn{}
+		a.rdr = nil
+		a.conn.Close()
+	}()
 	a.conn = nil
 	a.attached = false
 	log.Printf("detached from X server")
+}
+
+// detachOnDeadConn handles the case where the X connection went away on its
+// own (typically the user closing the window, which makes the X server drop
+// the connection). Unlike doDetach it must NOT touch the connection or send
+// any X requests — the socket is already gone and would panic — it only clears
+// our state so the shell keeps running detached and a later attach can
+// reconnect on a fresh connection.
+func (a *app) detachOnDeadConn() {
+	if !a.attached {
+		return
+	}
+	// The X connection is already dead, so we must NOT call t.Detach() — its
+	// Destroy/Free requests and t.Conn deref would panic on the dead socket.
+	// Just drop our references; a.t's cached AA/RENDER/GC state is rebuilt by
+	// the next term.Attach (initAA reassigns those fields). The window XID is
+	// cleared so a later attach builds a fresh window.
+	a.t.XID = 0
+	a.t.Drawable.XID = 0
+	a.face = nil
+	a.tk = tk_core.TkConn{}
+	a.rdr = nil
+	a.conn = nil
+	a.attached = false
+	log.Printf("X connection lost: auto-detached (shell still running)")
 }
 
 func (a *app) doAttach(display string) error {
 	if a.attached {
 		return fmt.Errorf("already attached")
 	}
+	log.Printf("doAttach: dialing %q", display)
 
 	conn, err := proto.DialBE(display)
 	if err != nil {
 		return fmt.Errorf("dial %q: %w", display, err)
 	}
+	log.Printf("doAttach: dialed ok")
 
 	tk := tk_core.MakeTkConn(conn)
 
@@ -270,12 +352,14 @@ func (a *app) doAttach(display string) error {
 		conn.Close()
 		return fmt.Errorf("RENDER: %w", err)
 	}
+	log.Printf("doAttach: RENDER open ok")
 
 	face, err := ttf.Open(&tk, rdr, ttfPath, 13, 96)
 	if err != nil {
 		conn.Close()
 		return fmt.Errorf("open TTF: %w", err)
 	}
+	log.Printf("doAttach: TTF open ok")
 
 	a.conn = conn
 	a.tk = tk
@@ -293,14 +377,22 @@ func (a *app) doAttach(display string) error {
 	a.t.SetBackPixel = true
 	a.t.BackPixel = conn.DefaultBlackPixel()
 
+	log.Printf("doAttach: calling term.Attach")
 	if err := a.t.Attach(&tk, tk.GetRoot().XID); err != nil {
 		face.Close()
 		conn.Close()
 		a.conn = nil
 		return err
 	}
+	log.Printf("doAttach: term.Attach ok")
 
 	a.attached = true
+	a.attachSeq++
+	// Draw the already-produced shell output immediately (the window was just
+	// mapped by term.Attach), and also mark dirty so the event loop redraws on
+	// the next cycle / Expose.
+	_ = a.t.Draw()
+	a.t.Dirty()
 	log.Printf("attached to display %q", display)
 	return nil
 }

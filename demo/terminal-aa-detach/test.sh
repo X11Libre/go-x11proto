@@ -25,15 +25,15 @@ mkfifo /tmp/term-p3
 > /tmp/term-test.pids
 
 # 1: per Signal (no control pipe)
-"$BIN" &
+"$BIN" 2>>/tmp/opencode/taad-run.log &
 echo "$!" >> /tmp/term-test.pids
 
 # 2: --detached, per Pipe (subshell opens READ end on fd 10)
-( exec 10</tmp/term-p2; TERM_CTRL_FD=10 "$BIN" --detached ) &
+( exec 10</tmp/term-p2; TERM_CTRL_FD=10 "$BIN" --detached ) 2>>/tmp/opencode/taad-run.log &
 echo "$!" >> /tmp/term-test.pids
 
 # 3: normal, per Pipe (subshell opens READ end on fd 10)
-( exec 10</tmp/term-p3; TERM_CTRL_FD=10 "$BIN" ) &
+( exec 10</tmp/term-p3; TERM_CTRL_FD=10 "$BIN" ) 2>>/tmp/opencode/taad-run.log &
 echo "$!" >> /tmp/term-test.pids
 
 # Parent shell opens WRITE ends (unblocks subshells)
