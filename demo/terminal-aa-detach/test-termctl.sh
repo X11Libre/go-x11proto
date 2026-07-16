@@ -3,16 +3,13 @@
 # test-termctl.sh — manual smoke test for the termctl-backed
 # demo/terminal-aa-detach in a real X session (DISPLAY=:0.0).
 #
-# What it exercises:
-#   * detached start (no window)
-#   * SIGUSR2 -> attach (window appears)
-#   * SIGUSR1 -> detach (window gone, shell alive)
-#   * closing the window -> auto-detach
-#   * control pipe mode: --pipe PATH + "attach"/"detach"/"status" commands
-#   * TERM_CTRL_FD mode: parent opens a pipe, spawns child with the fd
+# Exercises:
+#   * detached start (no window) + signal-driven attach/detach via SIGUSR1/2
+#   * window-close auto-detach + re-attach
+#   * the caller-side registry + "ctl" subcommand (stand-in for starfleetctl):
+#     a second process drives the running terminal by NAME over OpenPipe.
 #
-# It does NOT auto-verify pixels; you watch the windows. Each step waits for
-# your <enter> so you can observe the state.
+# Each step waits for your <enter> so you can observe the state.
 #
 set -u
 
@@ -33,9 +30,9 @@ pause() {
 
 echo
 echo "=================================================="
-echo "TEST 1: detached start + signal-driven attach/detach"
+echo "TEST 1: signal-driven attach/detach (SIGUSR1/SIGUSR2)"
 echo "=================================================="
-"$BIN" --detached --name test1 &
+"$BIN" run --detached --name test1 &
 PID=$!
 echo "started pid=$PID (no window yet)"
 pause "-> send SIGUSR2 to ATTACH (window should appear)"
@@ -54,58 +51,24 @@ echo "test1 done"
 
 echo
 echo "=================================================="
-echo "TEST 2: control pipe mode (--pipe PATH)"
+echo "TEST 2: caller-side registry + 'ctl' by name (OpenPipe)"
 echo "=================================================="
-PIPE=$(mktemp -u /tmp/termctl-test2.XXXXXX)
-"$BIN" --detached --name test2 --pipe "$PIPE" &
+# This simulates starfleetctl: a terminal is started and recorded in the demo
+# registry; a SEPARATE process (the 'ctl' subcommand) drives it by name.
+"$BIN" run --detached --name test2 &
 PID=$!
-echo "started pid=$PID, pipe=$PIPE"
-pause "-> attach via pipe"
-printf 'attach\n' > "$PIPE"
-pause "-> status via pipe"
-printf 'status\n' > "$PIPE"
-pause "-> detach via pipe"
-printf 'detach\n' > "$PIPE"
-pause "-> attach again via pipe"
-printf 'attach\n' > "$PIPE"
-pause "-> quit via pipe"
-printf 'quit\n' > "$PIPE"
+echo "started pid=$PID, name=test2"
+pause "-> ctl test2 attach (window should appear)"
+"$BIN" ctl test2 attach
+pause "-> ctl test2 detach (window should vanish, shell alive)"
+"$BIN" ctl test2 detach
+pause "-> ctl test2 attach again"
+"$BIN" ctl test2 attach
+pause "-> ctl test2 stop (shell killed, registry entry removed)"
+"$BIN" ctl test2 stop
 wait "$PID" 2>/dev/null
-echo "test2 done; pipe removed by Close: $(ls -l "$PIPE" 2>&1 || true)"
-
-echo
-echo "=================================================="
-echo "TEST 3: inherited control fd (TERM_CTRL_FD)"
-echo "=================================================="
-# Parent opens a pipe, passes the write-end fd to the child as TERM_CTRL_FD.
-# The child reads commands on that fd. We write commands from the parent.
-PIPE3=$(mktemp -u /tmp/termctl-test3.XXXXXX)
-mkfifo "$PIPE3"
-exec {WFD}>"$PIPE3"
-"$BIN" --detached --name test3 --pipe /dev/null &
-PID=$!
-# Re-exec with fd inheritance: simpler to use a subshell that dups the fd.
-# (The demo reads TERM_CTRL_FD as an already-open fd number.)
-(
-	# open the read end and export its fd number
-	exec {RFDrd}<"$PIPE3"
-	TERM_CTRL_FD=$RFDrd "$BIN" --detached --name test3 &
-	CHILDPID=$!
-	echo "started child pid=$CHILDPID reading from fd=$RFDrd"
-	sleep 1
-	echo "attach" >&$WFD
-	sleep 1
-	echo "-> child should have attached (window visible)"
-	sleep 2
-	echo "detach" >&$WFD
-	sleep 1
-	echo "-> child should have detached"
-	sleep 2
-	echo "quit" >&$WFD
-	wait $CHILDPID 2>/dev/null
-)
-rm -f "$PIPE3"
-echo "test3 done"
+echo "test2 done; registry entry should be gone:"
+grep -q test2 "$REPO_ROOT"/../*/termctl-demo-registry.txt 2>/dev/null && echo "STILL PRESENT" || echo "removed (or no registry file)"
 
 echo
 echo "ALL TESTS COMPLETE"

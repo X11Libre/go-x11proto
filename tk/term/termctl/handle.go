@@ -7,7 +7,8 @@
 // A TermHandle owns a shell running in a PTY. The X window is created and
 // destroyed on demand via Attach/Detach; the shell keeps running while
 // detached. A handle may also expose a control pipe so a *different* process
-// can attach/detach/stop it by name (see WithControlPipe and Open).
+// can attach/detach/stop it (see WithControlPipe and OpenPipe). The caller is
+// responsible for naming and for any name->path registry.
 package termctl
 
 import (
@@ -102,18 +103,12 @@ func New(opts ...Opt) (*TermHandle, error) {
 	if err := h.startShell(); err != nil {
 		return nil, err
 	}
-	// Wire up the optional control channel (FIFO pipe or inherited fd). For
-	// FIFO mode the name is registered so other processes can Open() it.
+	// Wire up the optional control channel (FIFO pipe or inherited fd). The
+	// caller owns any name->path bookkeeping; termctl just serves the pipe.
 	if h.ctrl != nil {
 		if err := h.ctrl.open(); err != nil {
 			_ = h.Close()
 			return nil, fmt.Errorf("control channel: %w", err)
-		}
-		if fc, ok := h.ctrl.(*fifoCtrl); ok {
-			if err := register(h.name, fc.path); err != nil {
-				_ = h.Close()
-				return nil, err
-			}
 		}
 	}
 	return h, nil

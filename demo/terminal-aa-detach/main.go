@@ -1,8 +1,23 @@
 // Command terminal-aa-detach is a terminal emulator that can detach from the
 // X server and later reattach, controlled via signals, an inherited control
-// fd (TERM_CTRL_FD), or (optionally) a named control pipe + registry.
+// fd (TERM_CTRL_FD), or a named control pipe.
 //
-// Signals:
+// It also serves as a stand-in for starfleetctl's caller side: it maintains a
+// tiny name->pipe registry (a plain file) so a separate "ctl" invocation can
+// drive an already-running terminal by name — exactly what starfleetctl will
+// do later, just with its own registry instead of this demo's.
+//
+// Usage:
+//
+//	terminal-aa-detach run [--detached] [--name NAME] [--pipe PATH] [shell]
+//	    Start a terminal. If --pipe is omitted a path is derived from --name
+//	    (or a generated id) under the work temp dir. The (name, pipe) pair is
+//	    recorded in the demo registry.
+//
+//	terminal-aa-detach ctl <name> <attach|detach|stop> [display]
+//	    Drive a running terminal by name via OpenPipe.
+//
+// Signals (only relevant to a "run" process):
 //
 //	SIGUSR1   detach
 //	SIGUSR2   attach to $DISPLAY
@@ -15,25 +30,16 @@
 //	attach <display>  attach to display (e.g. ":1"); empty = $DISPLAY
 //	status            print "attached" or "detached"
 //	quit              exit (kills shell)
-//
-// Named control pipe (--pipe PATH): a FIFO is created at PATH and the terminal
-// is registered under --name so other processes can drive it via
-// termctl.Open(name). Same command set as above.
-//
-// Usage:
-//
-//	terminal-aa-detach [--detached] [--pipe PATH] [--name NAME] [shell-command]
-//
-// With --detached, the terminal starts without an X11 connection. The shell
-// runs in a PTY with no visible window until "attach <display>" is sent.
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
@@ -42,17 +48,114 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags)
 	log.SetPrefix(fmt.Sprintf("[pid %d] ", os.Getpid()))
-	log.Printf("START args=%v", os.Args)
 
+	args := os.Args[1:]
+	if len(args) == 0 {
+		usage()
+		os.Exit(2)
+	}
+
+	switch args[0] {
+	case "run":
+		cmdRun(args[1:])
+	case "ctl":
+		cmdCtl(args[1:])
+	default:
+		usage()
+		os.Exit(2)
+	}
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, `usage:
+  terminal-aa-detach run [--detached] [--name NAME] [--pipe PATH] [shell]
+  terminal-aa-detach ctl <name> <attach|detach|stop> [display]`)
+}
+
+// workDir returns the demo's registry directory (prefers MPBT_WORK_TMPDIR).
+func workDir() string {
+	if d := os.Getenv("MPBT_WORK_TMPDIR"); d != "" {
+		return d
+	}
+	return os.TempDir()
+}
+
+// registryPath is the demo's tiny name->pipe store (stand-in for starfleetctl).
+func registryPath() string {
+	return workDir() + "/termctl-demo-registry.txt"
+}
+
+// regGet looks up a name in the demo registry and returns its pipe path.
+func regGet(name string) (string, bool) {
+	f, err := os.Open(registryPath())
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 && parts[0] == name {
+			return parts[1], true
+		}
+	}
+	return "", false
+}
+
+// regPut records name->pipe in the demo registry.
+func regPut(name, pipe string) {
+	path := registryPath()
+	var b strings.Builder
+	b.WriteString("# termctl demo registry: name=pipe\n")
+	if f, err := os.Open(path); err == nil {
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := sc.Text()
+			if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+				continue
+			}
+			if strings.HasPrefix(line, name+"=") {
+				continue // overwrite existing
+			}
+			b.WriteString(line + "\n")
+		}
+		f.Close()
+	}
+	b.WriteString(fmt.Sprintf("%s=%s\n", name, pipe))
+	_ = os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+// regDel removes a name from the demo registry.
+func regDel(name string) {
+	path := registryPath()
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	var lines []string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(line, name+"=") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	f.Close()
+	_ = os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}
+
+func cmdRun(args []string) {
 	var (
 		startDetached bool
 		pipePath      string
 		name          string
 		shell         string
 	)
-	// Parse --detached / --pipe PATH / --name NAME plus an optional trailing
-	// shell command (kept legible for a demo).
-	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--detached":
@@ -73,16 +176,19 @@ func main() {
 			}
 		}
 	}
+	if name == "" {
+		name = fmt.Sprintf("term-%d", os.Getpid())
+	}
+	if pipePath == "" {
+		pipePath = fmt.Sprintf("%s/termctl-%s.pipe", workDir(), name)
+	}
 
-	opts := []termctl.Opt{}
+	opts := []termctl.Opt{
+		termctl.WithName(name),
+		termctl.WithControlPipe(pipePath),
+	}
 	if shell != "" {
 		opts = append(opts, termctl.WithShell(shell))
-	}
-	if name != "" {
-		opts = append(opts, termctl.WithName(name))
-	}
-	if pipePath != "" {
-		opts = append(opts, termctl.WithControlPipe(pipePath))
 	}
 	// Inherited control fd from a parent (TERM_CTRL_FD convention).
 	if fdStr := os.Getenv("TERM_CTRL_FD"); fdStr != "" {
@@ -97,6 +203,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("termctl.New: %v", err)
 	}
+	// The caller (this demo, standing in for starfleetctl) records the
+	// name->pipe mapping itself.
+	regPut(name, pipePath)
+	log.Printf("run: name=%s pipe=%s", name, pipePath)
 
 	go signalLoop(h)
 
@@ -104,13 +214,52 @@ func main() {
 		if err := h.Attach(""); err != nil {
 			log.Fatalf("initial attach: %v", err)
 		}
-		log.Printf("main: initial attach done")
+		log.Printf("run: initial attach done")
 	}
 
-	// Block until the shell exits (Run also handles cleanup of the control
-	// channel + registry entry).
 	if err := h.Run(); err != nil {
 		log.Printf("run: %v", err)
+	}
+	regDel(name)
+}
+
+func cmdCtl(args []string) {
+	if len(args) < 2 {
+		usage()
+		os.Exit(2)
+	}
+	name := args[0]
+	action := args[1]
+	display := ""
+	if len(args) > 2 {
+		display = args[2]
+	}
+	pipe, ok := regGet(name)
+	if !ok {
+		log.Fatalf("ctl: no terminal named %q in demo registry", name)
+	}
+	rem, err := termctl.OpenPipe(pipe)
+	if err != nil {
+		log.Fatalf("ctl: OpenPipe(%s): %v", pipe, err)
+	}
+	switch action {
+	case "attach":
+		if err := rem.Attach(display); err != nil {
+			log.Fatalf("ctl: attach: %v", err)
+		}
+		fmt.Printf("attached %s\n", name)
+	case "detach":
+		if err := rem.Detach(); err != nil {
+			log.Fatalf("ctl: detach: %v", err)
+		}
+		fmt.Printf("detached %s\n", name)
+	case "stop":
+		if err := rem.Stop(); err != nil {
+			log.Fatalf("ctl: stop: %v", err)
+		}
+		fmt.Printf("stopped %s\n", name)
+	default:
+		log.Fatalf("ctl: unknown action %q", action)
 	}
 }
 
@@ -127,8 +276,8 @@ func signalLoop(h *termctl.TermHandle) {
 		switch sig {
 		case syscall.SIGINT, syscall.SIGTERM:
 			// Close tears down the window, terminates the shell and removes
-			// the control channel. Run() (in main) observes the shell exit via
-			// OnExit and returns, ending the process cleanly.
+			// the control channel. Run() (in main) observes the shell exit
+			// via OnExit and returns, ending the process cleanly.
 			_ = h.Close()
 		case syscall.SIGUSR1:
 			if h.IsAttached() {

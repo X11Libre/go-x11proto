@@ -5,9 +5,10 @@ import "os"
 // Opt configures a TermHandle at construction time.
 type Opt func(*TermHandle)
 
-// WithName assigns a caller-chosen name used for cross-process addressing
-// (see Open). Names are the caller's responsibility; collisions are reported
-// by New/Open when a registry entry already exists.
+// WithName assigns a caller-chosen label for this handle. termctl does NOT
+// use the name for any lookup or registry; the caller (e.g. starfleetctl) is
+// responsible for mapping names to control-pipe paths. The name is only
+// metadata exposed via Name().
 func WithName(name string) Opt {
 	return func(h *TermHandle) { h.name = name }
 }
@@ -45,9 +46,9 @@ func WithOnExit(fn func()) Opt {
 }
 
 // WithControlPipe enables external control via a named pipe at the given
-// path. The pipe is created by New and removed by Close. Another process can
-// drive this handle through Open(name) (registry) or by writing commands
-// directly to the pipe. The name is registered so it can be looked up.
+// path. termctl creates the FIFO (mkfifo) on New and removes it on Close.
+// Another process drives this handle by writing commands directly to the
+// pipe path, or via OpenPipe(path). The caller owns any name->path mapping.
 func WithControlPipe(path string) Opt {
 	return func(h *TermHandle) { h.ctrl = newFifoCtrl(path, h) }
 }

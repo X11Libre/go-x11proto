@@ -11,8 +11,8 @@ import (
 // implementations exist:
 //
 //   - fifoCtrl: a named pipe created by New at a caller-chosen path; other
-//     processes address it by name via the registry (Open) or by writing to the
-//     pipe path directly.
+//     processes drive it by writing commands to the pipe path directly, or via
+//     OpenPipe(path). The caller owns any name->path bookkeeping.
 //   - fdCtrl: an already-open file descriptor (typically inherited from a
 //     parent that spawned the terminal, e.g. via TERM_CTRL_FD). The parent owns
 //     the other end; the child just reads commands and writes replies here.

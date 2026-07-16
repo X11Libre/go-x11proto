@@ -191,8 +191,8 @@ func (h *TermHandle) Stop() error {
 }
 
 // Close stops the shell (if running) and releases all resources: control
-// pipe, registry entry, and the OnExit cleanup callback. It is safe to call
-// multiple times.
+// pipe and the OnExit cleanup callback. It is safe to call multiple times.
+// The caller is responsible for any name->path registry bookkeeping.
 func (h *TermHandle) Close() error {
 	h.Stop()
 	h.mu.Lock()
@@ -205,7 +205,6 @@ func (h *TermHandle) Close() error {
 		h.ctrl.close()
 		h.ctrl = nil
 	}
-	unregister(h.name)
 	if h.onExit != nil {
 		h.onExit()
 	}
