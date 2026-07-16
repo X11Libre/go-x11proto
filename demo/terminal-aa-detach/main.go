@@ -323,8 +323,11 @@ func (a *app) detachOnDeadConn() {
 	// Just drop our references; a.t's cached AA/RENDER/GC state is rebuilt by
 	// the next term.Attach (initAA reassigns those fields). The window XID is
 	// cleared so a later attach builds a fresh window.
-	a.t.XID = 0
-	a.t.Drawable.XID = 0
+	// The X connection is already dead, so we must NOT call t.Detach() — its
+	// Destroy/Free requests would panic on the dead socket. ResetForReattach
+	// clears the Term's cached X resources without any X request, so the next
+	// term.Attach rebuilds everything fresh on a new connection.
+	a.t.ResetForReattach()
 	a.face = nil
 	a.tk = tk_core.TkConn{}
 	a.rdr = nil

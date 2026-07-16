@@ -354,6 +354,35 @@ func (t *Term) Detach() error {
 	return nil
 }
 
+// ResetForReattach clears the Term's cached X resources (AA/RENDER pictures,
+// GC, window XID, drawable connection) WITHOUT issuing any X request. It is
+// used after the X connection died on its own (e.g. the user closed the
+// window) so a subsequent Attach rebuilds every resource fresh on a new
+// connection. Calling t.Detach() in that situation would panic, because the
+// socket is already gone and the Destroy/Free calls would dereference nil.
+func (t *Term) ResetForReattach() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.primary = nil
+	t.clip = nil
+	t.aaBackPic = nil
+	t.aaBackPix = nil
+	t.aaPic = nil
+	t.aaFmt = 0
+	t.aaDepth = 0
+	t.aaBackW = 0
+	t.aaBackH = 0
+	t.gc = nil
+	t.gcBack = nil
+	t.gcBackDraw = tk_core.Drawable{}
+	t.clipCBWin = 0
+	t.clipWin = 0
+	t.XID = 0
+	t.Drawable.XID = 0
+	t.Drawable.Conn = nil
+}
+
 // Attach creates new X server resources for this Term on tk's X11 connection,
 // which must be a brand-new (or at least not the previously-detached)
 // connection. The caller must set Font, AAFace, AARender, Fg, Bg etc. on t
