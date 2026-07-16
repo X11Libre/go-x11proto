@@ -364,15 +364,18 @@ func (t *Term) Detach() error {
 // After Attach the window is mapped and the current grid is redrawn.
 func (t *Term) Attach(tk *tk_core.TkConn, parent base.WINDOW) error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	t.Drawable.Conn = tk
 	t.ParentXID = parent
 	t.Parent = nil
 
 	if err := t.initX(); err != nil {
+		t.mu.Unlock()
 		return err
 	}
+	// Release the lock before Draw: drawAA takes t.mu again to read the grid,
+	// so holding it here would deadlock (Attach -> initX -> Draw -> drawAA).
+	t.mu.Unlock()
 	_ = t.Draw()
 	return nil
 }
