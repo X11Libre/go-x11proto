@@ -3,7 +3,9 @@ package term
 import (
 	"fmt"
 	"log"
+	"os/exec"
 	"sync"
+	"syscall"
 
 	"encoding/base64"
 	"strings"
@@ -114,6 +116,7 @@ type Term struct {
 	grid   *Grid
 	parser *Parser
 	pty    *PTY
+	cmd    *exec.Cmd // spawned shell process (set by Start)
 
 	dirty        chan struct{}
 	cols, rows   int
@@ -546,6 +549,7 @@ func (t *Term) Start() error {
 		return err
 	}
 	t.pty = pty
+	t.cmd = cmd
 	go t.readLoop()
 	go func() {
 		err := cmd.Wait()
@@ -553,6 +557,23 @@ func (t *Term) Start() error {
 			t.OnExit(err)
 		}
 	}()
+	return nil
+}
+
+// Stop terminates the spawned shell: it closes the PTY master (the shell sees
+// EOF and exits) and, if that does not end it, sends SIGKILL to the process.
+// Safe to call multiple times; a no-op if the shell was never started.
+func (t *Term) Stop() error {
+	t.mu.Lock()
+	cmd := t.cmd
+	pty := t.pty
+	t.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+	}
+	if pty != nil {
+		_ = pty.Close()
+	}
 	return nil
 }
 
