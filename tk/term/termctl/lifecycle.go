@@ -19,7 +19,7 @@ func (h *TermHandle) Attach(display string) error {
 	h.mu.Lock()
 	if h.attached {
 		h.mu.Unlock()
-		if err := h.detach(); err != nil {
+		if err := h.Detach(); err != nil {
 			return err
 		}
 		h.mu.Lock()
@@ -92,16 +92,10 @@ func (h *TermHandle) Attach(display string) error {
 // from any goroutine; a no-op when already detached.
 func (h *TermHandle) Detach() error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.detach()
-}
-
-// detach assumes h.mu is held.
-func (h *TermHandle) detach() error {
 	if !h.attached {
+		h.mu.Unlock()
 		return nil
 	}
-
 	// Best-effort geometry capture before tearing down the connection.
 	if g, err := h.t.Window.GetGeometry(); err == nil {
 		h.geom.W = uint16(g.Width)
@@ -109,6 +103,17 @@ func (h *TermHandle) detach() error {
 		h.geom.X = int16(g.X)
 		h.geom.Y = int16(g.Y)
 	}
+	// Snapshot the live X handles and mark detached, then release the lock
+	// BEFORE stopping the run loop: runLoop needs h.mu (for autoDetachDead)
+	// and would deadlock if detach held it while waiting on runLoopWait.
+	conn := h.conn.conn
+	face := h.conn.face
+	h.conn.face = nil
+	h.conn.tk = tk_core.TkConn{}
+	h.conn.rdr = nil
+	h.conn.conn = nil
+	h.attached = false
+	h.mu.Unlock()
 
 	// term.Detach must run while the X connection is still alive (it issues
 	// Destroy/Free requests). Do it first, then close the connection so the
@@ -116,19 +121,14 @@ func (h *TermHandle) detach() error {
 	if err := h.t.Detach(); err != nil {
 		log.Printf("termctl: Detach: %v", err)
 	}
-	if h.conn.conn != nil {
-		h.conn.conn.Close()
+	if conn != nil {
+		conn.Close()
 	}
 	h.stopRunLoop()
 
-	if h.conn.face != nil {
-		h.conn.face.Close()
-		h.conn.face = nil
+	if face != nil {
+		face.Close()
 	}
-	h.conn.tk = tk_core.TkConn{}
-	h.conn.rdr = nil
-	h.conn.conn = nil
-	h.attached = false
 	return nil
 }
 
@@ -178,11 +178,12 @@ func (h *TermHandle) autoDetachDead() {
 // Stop terminates the shell (and detaches the window first, if attached).
 func (h *TermHandle) Stop() error {
 	h.mu.Lock()
-	if h.attached {
-		_ = h.detach()
-	}
+	attached := h.attached
 	t := h.t
 	h.mu.Unlock()
+	if attached {
+		_ = h.Detach()
+	}
 	if t == nil {
 		return nil
 	}
