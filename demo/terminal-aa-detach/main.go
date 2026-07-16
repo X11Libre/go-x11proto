@@ -31,8 +31,10 @@ import (
 	"syscall"
 
 	"github.com/X11Libre/go-x11proto/proto"
+	"github.com/X11Libre/go-x11proto/proto/base"
 	proto_core "github.com/X11Libre/go-x11proto/proto/core"
 	"github.com/X11Libre/go-x11proto/proto/core/events"
+	"github.com/X11Libre/go-x11proto/proto/rpc"
 	tk_core "github.com/X11Libre/go-x11proto/tk/core"
 	"github.com/X11Libre/go-x11proto/tk/font/ttf"
 	tk_render "github.com/X11Libre/go-x11proto/tk/render"
@@ -52,6 +54,10 @@ type app struct {
 	cmdCh    chan string
 	sigCh    chan os.Signal
 	ctrlF    *os.File // control pipe for responses
+
+	// remembered geometry across attach/detach cycles
+	winW, winH base.CARD16
+	winX, winY base.INT16
 }
 
 func main() {
@@ -60,6 +66,10 @@ func main() {
 	a := &app{
 		cmdCh: make(chan string, 8),
 		sigCh: make(chan os.Signal, 1),
+		winW:  800,
+		winH:  480,
+		winX:  50,
+		winY:  50,
 	}
 	signal.Notify(a.sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2)
 
@@ -220,6 +230,13 @@ func (a *app) doDetach() {
 	if !a.attached {
 		return
 	}
+	// Remember current window geometry before destroying resources.
+	if g, err := a.t.Window.GetGeometry(); err == nil {
+		a.winW = g.Width
+		a.winH = g.Height
+		a.winX = g.X
+		a.winY = g.Y
+	}
 	_ = a.t.Detach()
 	if a.face != nil {
 		a.face.Close()
@@ -227,6 +244,9 @@ func (a *app) doDetach() {
 	}
 	a.tk = tk_core.TkConn{}
 	a.rdr = nil
+	// Sync: wait for all pending X requests (DestroyWindow etc.) to be
+	// sent/processed before closing the connection.
+	_, _ = rpc.GetGeometry(a.conn, a.conn.DefaultRoot())
 	a.conn.Close()
 	a.conn = nil
 	a.attached = false
@@ -265,10 +285,10 @@ func (a *app) doAttach(display string) error {
 	a.t.AAFace = face
 	a.t.AARender = rdr
 	a.t.Fg, a.t.Bg = 0, 0
-	a.t.W = 800
-	a.t.H = 480
-	a.t.X = 50
-	a.t.Y = 50
+	a.t.W = a.winW
+	a.t.H = a.winH
+	a.t.X = a.winX
+	a.t.Y = a.winY
 	a.t.Name = "terminal-aa-detach"
 	a.t.SetBackPixel = true
 	a.t.BackPixel = conn.DefaultBlackPixel()

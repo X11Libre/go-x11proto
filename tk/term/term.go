@@ -314,6 +314,7 @@ func (t *Term) Detach() error {
 	defer t.mu.Unlock()
 
 	t.primary = nil
+	t.clip = nil
 
 	if t.aaBackPic != nil {
 		_ = t.aaBackPic.Free()
@@ -336,10 +337,12 @@ func (t *Term) Detach() error {
 		t.gcBack = nil
 		t.gcBackDraw = tk_core.Drawable{}
 	}
+	if t.clipCBWin != 0 {
+		_ = rpc.DestroyWindow(t.Conn.X11Conn, t.clipCBWin)
+		t.clipCBWin = 0
+	}
 	if t.clipWin != 0 {
-		// The clipboard offscreen window is destroyed by the server
-		// implicitly when the connection closes; explicitly forgetting
-		// the XID is enough here.
+		_ = rpc.DestroyWindow(t.Conn.X11Conn, t.clipWin)
 		t.clipWin = 0
 	}
 	if t.XID != 0 {
