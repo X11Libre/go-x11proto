@@ -43,9 +43,11 @@ type TermHandle struct {
 	conn     xconn
 	connSeq  int // bumped on every successful attach (EOF stale-guard)
 
-	// runLoop drives term.RunLoop on the live conn; closed to stop it.
+	// runLoopStop is closed to ask the current event-loop goroutine to exit.
+	// runLoopWait is closed by the event-loop goroutine when it has actually
+	// exited; detach() waits on it. Both are recreated on each Attach.
 	runLoopStop chan struct{}
-	runLoopDone chan struct{}
+	runLoopWait chan struct{}
 
 	// configuration
 	shell    string
@@ -88,7 +90,7 @@ func New(opts ...Opt) (*TermHandle, error) {
 		ttfPath: DefaultTTFPath,
 		geom:   Geometry{W: 800, H: 480, X: 50, Y: 50},
 		runLoopStop: make(chan struct{}),
-		runLoopDone: make(chan struct{}),
+		runLoopWait: make(chan struct{}),
 	}
 	for _, o := range opts {
 		o(h)
@@ -134,13 +136,15 @@ func (h *TermHandle) IsAttached() bool {
 	return h.attached
 }
 
-// stopRunLoop asks the X event loop to exit (if running) and waits for it.
+// stopRunLoop asks the current X event-loop goroutine to exit and waits until
+// it has done so. It is a no-op if no loop is running (runLoopWait already
+// closed). Safe to call multiple times.
 func (h *TermHandle) stopRunLoop() {
 	select {
 	case <-h.runLoopStop:
-		// already closed
+		// already asked to stop
 	default:
 		close(h.runLoopStop)
 	}
-	<-h.runLoopDone
+	<-h.runLoopWait
 }

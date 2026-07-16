@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 )
 
 // controller is the common surface for external control of a TermHandle. Two
@@ -97,7 +96,12 @@ func (c *fifoCtrl) open() error {
 	if err := mkfifo(c.path); err != nil && !os.IsExist(err) {
 		return err
 	}
-	f, err := os.OpenFile(c.path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	// Open O_RDWR (not O_RDONLY): a read-only open of a FIFO blocks until a
+	// writer appears, and a non-blocking read-only open makes bufio.Scanner
+	// bail on EAGAIN. O_RDWR never blocks on open and keeps the read end alive
+	// so external writers can open O_WRONLY without blocking, while our
+	// blocking reads still see EOF only when we close the fd.
+	f, err := os.OpenFile(c.path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
@@ -124,14 +128,11 @@ func (c *fifoCtrl) write(cmd string) error {
 	return err
 }
 
-func (c *fifoCtrl) reply(format string, args ...any) {
-	f, err := os.OpenFile(c.path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, format+"\n", args...)
-}
+// reply is a no-op for FIFO mode: writing a response back into the same FIFO
+// would be read again by our own readLoop (echo loop). External controllers
+// driving a FIFO send commands only; they do not read responses. (The fdCtrl
+// variant, backed by a dedicated parent-owned fd, may reply.)
+func (c *fifoCtrl) reply(format string, args ...any) {}
 
 func (c *fifoCtrl) close() {
 	if c.file != nil {

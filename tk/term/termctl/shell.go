@@ -1,6 +1,7 @@
 package termctl
 
 import (
+
 	"github.com/X11Libre/go-x11proto/tk/term"
 )
 

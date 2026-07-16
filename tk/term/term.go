@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"encoding/base64"
 	"strings"
@@ -561,15 +562,28 @@ func (t *Term) Start() error {
 }
 
 // Stop terminates the spawned shell: it closes the PTY master (the shell sees
-// EOF and exits) and, if that does not end it, sends SIGKILL to the process.
-// Safe to call multiple times; a no-op if the shell was never started.
+// EOF and exits) and signals the whole process group (the shell is spawned as
+// a session leader via Setsid, so a single-process signal is often ignored).
+// It sends SIGTERM first and, if the process is still alive after a short
+// grace period, escalates to SIGKILL. Safe to call multiple times; a no-op if
+// the shell was never started.
 func (t *Term) Stop() error {
 	t.mu.Lock()
 	cmd := t.cmd
 	pty := t.pty
 	t.mu.Unlock()
 	if cmd != nil && cmd.Process != nil {
+		pid := cmd.Process.Pid
+		// Negative pid targets the whole process group created by Setsid.
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
 		_ = cmd.Process.Signal(syscall.SIGTERM)
+		// Give the shell a brief moment to shut down gracefully, then force
+		// it. A goroutine avoids blocking Stop on the shell's exit.
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			_ = cmd.Process.Signal(syscall.SIGKILL)
+		}()
 	}
 	if pty != nil {
 		_ = pty.Close()

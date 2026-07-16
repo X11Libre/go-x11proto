@@ -29,6 +29,11 @@ func (h *TermHandle) Attach(display string) error {
 		return fmt.Errorf("termctl: handle has no shell (not started)")
 	}
 
+	// Fresh per-cycle event-loop channels (the previous cycle's were consumed
+	// by its stop/detach).
+	h.runLoopStop = make(chan struct{})
+	h.runLoopWait = make(chan struct{})
+
 	conn, err := proto.DialBE(display)
 	if err != nil {
 		h.mu.Unlock()
@@ -96,28 +101,32 @@ func (h *TermHandle) detach() error {
 	if !h.attached {
 		return nil
 	}
-	// Stop the event loop first so it does not race the teardown.
-	h.stopRunLoop()
 
-	// Best-effort geometry capture before destroying resources.
+	// Best-effort geometry capture before tearing down the connection.
 	if g, err := h.t.Window.GetGeometry(); err == nil {
 		h.geom.W = uint16(g.Width)
 		h.geom.H = uint16(g.Height)
 		h.geom.X = int16(g.X)
 		h.geom.Y = int16(g.Y)
 	}
+
+	// term.Detach must run while the X connection is still alive (it issues
+	// Destroy/Free requests). Do it first, then close the connection so the
+	// blocked RunLoop goroutine receives EOF and exits (closing runLoopWait).
 	if err := h.t.Detach(); err != nil {
 		log.Printf("termctl: Detach: %v", err)
 	}
+	if h.conn.conn != nil {
+		h.conn.conn.Close()
+	}
+	h.stopRunLoop()
+
 	if h.conn.face != nil {
 		h.conn.face.Close()
 		h.conn.face = nil
 	}
 	h.conn.tk = tk_core.TkConn{}
 	h.conn.rdr = nil
-	if h.conn.conn != nil {
-		h.conn.conn.Close()
-	}
 	h.conn.conn = nil
 	h.attached = false
 	return nil
@@ -128,7 +137,7 @@ func (h *TermHandle) detach() error {
 // stopRunLoop is called. On an unexpected close it auto-detaches so the shell
 // survives.
 func (h *TermHandle) runLoop(conn *proto_core.X11Conn, seq int) {
-	defer func() { <-h.runLoopDone }()
+	defer close(h.runLoopWait)
 	for {
 		// Terminate early on explicit stop.
 		select {

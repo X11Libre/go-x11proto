@@ -126,8 +126,10 @@ func signalLoop(h *termctl.TermHandle) {
 		log.Printf("SIGNAL received: %v", sig)
 		switch sig {
 		case syscall.SIGINT, syscall.SIGTERM:
+			// Close tears down the window, terminates the shell and removes
+			// the control channel. Run() (in main) observes the shell exit via
+			// OnExit and returns, ending the process cleanly.
 			_ = h.Close()
-			os.Exit(0)
 		case syscall.SIGUSR1:
 			if h.IsAttached() {
 				if err := h.Detach(); err != nil {
