@@ -429,6 +429,16 @@ func (c *X11Conn) Send(req base.Request) (base.CARD16, error) {
 func (c *X11Conn) SendAndWait(req base.Request) (*base.ReplyReader, error) {
 	c.writeMu.Lock()
 
+	// The connection may already be closed (e.g. a ConfigureEvent delivered to
+	// the event loop raced with Close(), which nils out c.pending). Return a
+	// clean error instead of panicking on "assignment to entry in nil map"
+	// below — callers (notably termctl's resize path) must handle a dead
+	// connection gracefully rather than take the whole event loop down.
+	if c.closed.Load() {
+		c.writeMu.Unlock()
+		return nil, c.errorF("SendAndWait(): connection closed")
+	}
+
 	b, err := c.encodeRequest(req)
 	if err != nil {
 		c.writeMu.Unlock()
@@ -449,6 +459,12 @@ func (c *X11Conn) SendAndWait(req base.Request) (*base.ReplyReader, error) {
 	}
 
 	c.pendingMu.Lock()
+	if c.pending == nil {
+		// Closed concurrently with the check above: treat as closed.
+		c.pendingMu.Unlock()
+		c.writeMu.Unlock()
+		return nil, c.errorF("SendAndWait(): connection closed")
+	}
 	c.pending[seq] = pr
 	c.pendingMu.Unlock()
 
