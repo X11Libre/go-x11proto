@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -737,11 +738,11 @@ func (t *Term) RunLoop(conn *core.X11Conn) {
 			}
 			// A panic in event handling (e.g. a selection RPC or a bad
 			// event) must never take down the whole loop — that would stop
-			// every redraw. Recover, log, and keep looping.
+			// every redraw. Recover, log with a stack trace, and keep looping.
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						log.Printf("term: recovered from event handler panic: %v", r)
+						log.Printf("term: recovered from event handler panic: %v\n%s", r, debug.Stack())
 					}
 				}()
 				conn.DeliverWindowEvent(ev)
@@ -1309,7 +1310,9 @@ func (t *Term) HandleWindowEvent(ev events.Event) bool {
 	case *events.FocusInEvent:
 		// Re-assert keyboard focus (some WMs only grant it on FocusIn, or
 		// revoke it when the window is switched away and back).
-		_ = rpc.SetInputFocus(t.Conn.X11Conn, 2 /*RevertToParent*/, t.Window.XID, 0)
+		if t.Conn != nil && t.Conn.X11Conn != nil {
+			_ = rpc.SetInputFocus(t.Conn.X11Conn, 2 /*RevertToParent*/, t.Window.XID, 0)
+		}
 	case *events.ConfigureEvent:
 		t.W, t.H = e.Width, e.Height
 		t.handleResize()
