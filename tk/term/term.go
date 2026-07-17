@@ -197,8 +197,8 @@ func (t *Term) Init() error {
 func (t *Term) initX() error {
 	t.resolver = newPixelResolver(t.Conn.X11Conn)
 
-	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.Exposure | event_mask.StructureNotify |
-		event_mask.ButtonPress | event_mask.ButtonRelease | event_mask.ButtonMotion)
+	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.KeyRelease | event_mask.Exposure | event_mask.StructureNotify |
+		event_mask.ButtonPress | event_mask.ButtonRelease | event_mask.ButtonMotion | event_mask.FocusChange)
 	t.Window.SetWindowHandler(t)
 	if err := t.Window.Create(); err != nil {
 		return err
@@ -411,6 +411,11 @@ func (t *Term) Attach(tk *tk_core.TkConn, parent base.WINDOW) error {
 	// so holding it here would deadlock (Attach -> initX -> Draw -> drawAA).
 	t.mu.Unlock()
 	_ = t.Draw()
+	// Grab keyboard focus so keystrokes reach the terminal. A window mapped
+	// programmatically is not automatically focused by every WM (notably
+	// click-to-focus setups), and without focus no KeyPress events arrive —
+	// the terminal would show output but accept no input.
+	_ = rpc.SetInputFocus(t.Conn.X11Conn, 2 /*RevertToParent*/, t.Window.XID, 0)
 	return nil
 }
 
@@ -1301,6 +1306,10 @@ func (t *Term) HandleWindowEvent(ev events.Event) bool {
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		_ = t.Draw()
+	case *events.FocusInEvent:
+		// Re-assert keyboard focus (some WMs only grant it on FocusIn, or
+		// revoke it when the window is switched away and back).
+		_ = rpc.SetInputFocus(t.Conn.X11Conn, 2 /*RevertToParent*/, t.Window.XID, 0)
 	case *events.ConfigureEvent:
 		t.W, t.H = e.Width, e.Height
 		t.handleResize()
