@@ -199,7 +199,7 @@ func (t *Term) initX() error {
 	t.resolver = newPixelResolver(t.Conn.X11Conn)
 
 	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.KeyRelease | event_mask.Exposure | event_mask.StructureNotify |
-		event_mask.ButtonPress | event_mask.ButtonRelease | event_mask.ButtonMotion | event_mask.FocusChange)
+		event_mask.ButtonPress | event_mask.ButtonRelease | event_mask.ButtonMotion | event_mask.FocusChange | event_mask.VisibilityChange)
 	t.Window.SetWindowHandler(t)
 	if err := t.Window.Create(); err != nil {
 		return err
@@ -412,11 +412,12 @@ func (t *Term) Attach(tk *tk_core.TkConn, parent base.WINDOW) error {
 	// so holding it here would deadlock (Attach -> initX -> Draw -> drawAA).
 	t.mu.Unlock()
 	_ = t.Draw()
-	// Grab keyboard focus so keystrokes reach the terminal. A window mapped
-	// programmatically is not automatically focused by every WM (notably
-	// click-to-focus setups), and without focus no KeyPress events arrive —
-	// the terminal would show output but accept no input.
-	_ = rpc.SetInputFocus(t.Conn.X11Conn, 2 /*RevertToParent*/, t.Window.XID, 0)
+	// NOTE: we do NOT grab input focus here. Calling SetInputFocus on map
+	// steals focus from whatever window the user is currently on (and, with
+	// several terminals, from each other) — a focus fight the WM keeps
+	// re-arbitrating. Instead we re-assert focus only once the WM has already
+	// given it to us (see FocusIn in HandleWindowEvent), which is the ICCCM-
+	// correct, non-disruptive behaviour.
 	return nil
 }
 
@@ -1322,6 +1323,11 @@ func (t *Term) HandleWindowEvent(ev events.Event) bool {
 	switch e := ev.(type) {
 	case *events.ExposeEvent:
 		_ = t.Draw()
+	case *events.VisibilityEvent:
+		// A visibility change (e.g. window maximized/unobscured) is not
+		// always accompanied by an Expose, so redraw here too — otherwise
+		// the freshly-visible area shows stale content.
+		_ = t.Draw()
 	case *events.FocusInEvent:
 		// Re-assert keyboard focus (some WMs only grant it on FocusIn, or
 		// revoke it when the window is switched away and back).
@@ -1329,6 +1335,7 @@ func (t *Term) HandleWindowEvent(ev events.Event) bool {
 			_ = rpc.SetInputFocus(t.Conn.X11Conn, 2 /*RevertToParent*/, t.Window.XID, 0)
 		}
 	case *events.ConfigureEvent:
+		t.X, t.Y = e.X, e.Y
 		t.W, t.H = e.Width, e.Height
 		t.handleResize()
 	case *events.KeyPressEvent:
