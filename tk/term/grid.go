@@ -292,8 +292,8 @@ func (g *Grid) Resize(rows, cols int) {
 	if cols < 1 {
 		cols = 1
 	}
-	g.primary = resizeRows(g.primary, rows, cols, g.blank)
-	g.altBuf = resizeRows(g.altBuf, rows, cols, g.blank)
+	g.primary = resizeRows(g.primary, rows, cols, g.blank, g.onAlt, &g.scrollback, g.scrollbackCap)
+	g.altBuf = resizeRows(g.altBuf, rows, cols, g.blank, false, nil, 0)
 	g.Rows, g.Cols = rows, cols
 	if g.onAlt {
 		g.cur = g.altBuf
@@ -305,8 +305,25 @@ func (g *Grid) Resize(rows, cols int) {
 	g.SetCursor(g.CursorRow, g.CursorCol)
 }
 
-func resizeRows(rows [][]Cell, newRows, newCols int, blank func() Cell) [][]Cell {
+// resizeRows rebuilds a grid for a new row/col count. When shrinking
+// (newRows < len(rows)), the lines that no longer fit on screen are the most
+// recent content; on the primary screen they are pushed into scrollback (sb,
+// capped at sbCap) so a resize never silently discards visible output — that
+// is what makes scrolling up after a shrink (or after a reattach at a smaller
+// size) actually show the lines that scrolled off. On the alt screen (or when
+// sb is nil) overflow is simply dropped, matching real terminal behaviour.
+func resizeRows(rows [][]Cell, newRows, newCols int, blank func() Cell, primary bool, sb *[][]Cell, sbCap int) [][]Cell {
 	out := make([][]Cell, newRows)
+	if len(rows) > newRows && primary && sb != nil {
+		for r := newRows; r < len(rows); r++ {
+			cp := make([]Cell, len(rows[r]))
+			copy(cp, rows[r])
+			*sb = append(*sb, cp)
+		}
+		if len(*sb) > sbCap {
+			*sb = (*sb)[len(*sb)-sbCap:]
+		}
+	}
 	for r := 0; r < newRows; r++ {
 		row := make([]Cell, newCols)
 		for c := range row {
