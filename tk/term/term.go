@@ -749,9 +749,24 @@ func (t *Term) RunLoop(conn *core.X11Conn) {
 				conn.DeliverWindowEvent(ev)
 			}()
 		case <-t.dirty:
-			_ = t.Draw()
+			// A panic during a repaint (e.g. a failed resize/backbuffer
+			// recreation) must also be contained: an unrecovered panic here
+			// would kill the whole event loop and freeze the terminal for
+			// good (no further repaints or input handling).
+			t.safeDraw()
 		}
 	}
+}
+
+// safeDraw redraws, recovering from any panic so a single bad repaint can
+// never take down the event loop.
+func (t *Term) safeDraw() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("term: recovered from draw panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+	_ = t.Draw()
 }
 
 // Paste writes s to the PTY, wrapped in bracketed-paste markers if the
@@ -1037,7 +1052,11 @@ func (t *Term) drawAA() error {
 		return err
 	}
 
-	for r := 0; r < rows; r++ {
+	// cells may be shorter than rows when scrolled back into history (the
+	// scrollback buffer has fewer lines than the visible area). Iterate only
+	// over what we actually have; the background fill above already cleared
+	// the whole backbuffer, so the uncovered tail stays correct.
+	for r := 0; r < rows && r < len(cells); r++ {
 		row := cells[r]
 		y := r * h
 		if !t.selActive {
