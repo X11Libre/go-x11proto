@@ -1370,6 +1370,16 @@ func (t *Term) HandleWindowEvent(ev events.Event) bool {
 }
 
 func (t *Term) handleResize() {
+	// The ConfigureEvent's width/height can reflect the WM frame or an
+	// intermediate size (especially right after a (re)attach or a maximize),
+	// so re-query the window's real inner geometry before computing the grid
+	// size. Racing the WM here is what makes a TUI occasionally miss the
+	// correct size on the first resize and only catch up on the next one.
+	if t.Conn != nil && t.Conn.X11Conn != nil && !t.Window.XID.Invalid() {
+		if g, err := rpc.GetGeometry(t.Conn.X11Conn, t.Window.XID); err == nil {
+			t.W, t.H = g.Width, g.Height
+		}
+	}
 	cols, rows := t.cellSize()
 	t.mu.Lock()
 	changed := cols != t.cols || rows != t.rows
