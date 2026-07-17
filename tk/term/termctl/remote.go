@@ -3,6 +3,7 @@ package termctl
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 // Remote is a handle to a TermHandle owned by another process, driven over its
@@ -66,11 +67,21 @@ func (r *Remote) Status() (string, error) {
 func (r *Remote) Pipe() string { return r.pipe }
 
 func (r *Remote) send(cmd string) error {
-	f, err := os.OpenFile(r.pipe, os.O_WRONLY, 0)
-	if err != nil {
+	done := make(chan error, 1)
+	go func() {
+		f, err := os.OpenFile(r.pipe, os.O_WRONLY, 0)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer f.Close()
+		_, err = fmt.Fprintln(f, cmd)
+		done <- err
+	}()
+	select {
+	case err := <-done:
 		return err
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("termctl: Remote send timeout (no reader on pipe %s)", r.pipe)
 	}
-	defer f.Close()
-	_, err = fmt.Fprintln(f, cmd)
-	return err
 }

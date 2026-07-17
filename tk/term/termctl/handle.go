@@ -51,12 +51,13 @@ type TermHandle struct {
 	runLoopWait chan struct{}
 
 	// configuration
-	shell    string
-	extraEnv []string
-	title    string
-	ttfPath  string
-	geom     Geometry
-	onExit   func()
+	shell     string
+	shellArgs []string
+	extraEnv  []string
+	title     string
+	ttfPath   string
+	geom      Geometry
+	onExit    func()
 
 	// shellExited is set by onShellExit (term.Start's wait goroutine).
 	shellExited bool

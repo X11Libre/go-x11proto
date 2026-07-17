@@ -18,6 +18,12 @@ func WithShell(shell string) Opt {
 	return func(h *TermHandle) { h.shell = shell }
 }
 
+// WithShellArgs sets arguments to pass to the shell command (e.g. "-c" "command").
+// If not set, the shell is started with no arguments (interactive mode).
+func WithShellArgs(args []string) Opt {
+	return func(h *TermHandle) { h.shellArgs = args }
+}
+
 // WithExtraEnv appends environment assignments (e.g. "FOO=bar") to the
 // spawned shell.
 func WithExtraEnv(env []string) Opt {

@@ -59,6 +59,7 @@ type Term struct {
 	FgRGB, BgRGB [3]byte
 
 	Shell    string
+	ShellArgs []string
 	ExtraEnv []string
 
 	OnTitle func(string)
@@ -544,7 +545,7 @@ func (t *Term) Start() error {
 	if shell == "" {
 		shell = shellFromEnv()
 	}
-	cmd, err := Spawn(pty, shell, t.ExtraEnv, t.Type.Name)
+	cmd, err := Spawn(pty, shell, t.ShellArgs, t.ExtraEnv, t.Type.Name)
 	if err != nil {
 		pty.Close()
 		return err

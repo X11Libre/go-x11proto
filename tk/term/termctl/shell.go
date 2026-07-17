@@ -9,13 +9,14 @@ import (
 // PTY. The window is created later by Attach.
 func (h *TermHandle) startShell() error {
 	t := &term.Term{
-		Type:     term.XTerm256Color,
-		Shell:    h.shellCmd(),
-		ExtraEnv: h.extraEnv,
-		FgRGB:    [3]byte{0xff, 0xff, 0xff},
-		BgRGB:    [3]byte{0x00, 0x00, 0x00},
-		OnTitle:  func(string) {},
-		OnExit:   h.onShellExit,
+		Type:       term.XTerm256Color,
+		Shell:      h.shellCmd(),
+		ShellArgs:  h.shellArgs,
+		ExtraEnv:   h.extraEnv,
+		FgRGB:      [3]byte{0xff, 0xff, 0xff},
+		BgRGB:      [3]byte{0x00, 0x00, 0x00},
+		OnTitle:    func(string) {},
+		OnExit:     h.onShellExit,
 	}
 	if err := t.InitTerm(); err != nil {
 		return err

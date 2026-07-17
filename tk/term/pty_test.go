@@ -14,7 +14,7 @@ func TestPTYSpawnAndReadOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenPTY: %v", err)
 	}
-	cmd, err := Spawn(pty, "/bin/echo", []string{"PTY_TEST=1"}, "dumb")
+	cmd, err := Spawn(pty, "/bin/echo", nil, []string{"PTY_TEST=1"}, "dumb")
 	if err != nil {
 		pty.Close()
 		t.Fatalf("Spawn: %v", err)
@@ -50,7 +50,7 @@ func TestPTYCatEchoesInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenPTY: %v", err)
 	}
-	cmd, err := Spawn(pty, "/bin/cat", nil, "dumb")
+	cmd, err := Spawn(pty, "/bin/cat", nil, nil, "dumb")
 	if err != nil {
 		pty.Close()
 		t.Fatalf("Spawn: %v", err)

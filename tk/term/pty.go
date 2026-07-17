@@ -66,26 +66,27 @@ func (p *PTY) Close() error {
 	return p.Master.Close()
 }
 
-// Spawn starts shell as the PTY's controlling process: stdio is the slave
-// end, TERM is set to termType, and it becomes the leader of a new session
-// with the slave as its controlling terminal — the standard setup every
-// terminal emulator performs for its child shell. After a successful start,
-// the parent's copy of the slave fd is closed (the child owns it now); only
+// Spawn starts the given command as the PTY's controlling process: stdio is
+// the slave end, TERM is set to termType, and it becomes the leader of a new
+// session with the slave as its controlling terminal — the standard setup every
+// terminal emulator performs for its child shell. The command is specified by
+// cmd (the executable) and args (its arguments). After a successful start, the
+// parent's copy of the slave fd is closed (the child owns it now); only
 // pty.Master is used from here on.
-func Spawn(pty *PTY, shell string, extraEnv []string, termType string) (*exec.Cmd, error) {
-	cmd := exec.Command(shell)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = pty.Slave, pty.Slave, pty.Slave
-	cmd.Env = append(append([]string{}, os.Environ()...), "TERM="+termType)
-	cmd.Env = append(cmd.Env, extraEnv...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
+func Spawn(pty *PTY, cmd string, args []string, extraEnv []string, termType string) (*exec.Cmd, error) {
+	c := exec.Command(cmd, args...)
+	c.Stdin, c.Stdout, c.Stderr = pty.Slave, pty.Slave, pty.Slave
+	c.Env = append(append([]string{}, os.Environ()...), "TERM="+termType)
+	c.Env = append(c.Env, extraEnv...)
+	c.SysProcAttr = &syscall.SysProcAttr{
 		Setsid:  true,
 		Setctty: true,
-		Ctty:    0, // fd 0 in the child == cmd.Stdin == the slave
+		Ctty:    0, // fd 0 in the child == c.Stdin == the slave
 	}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("term: spawn %s: %w", shell, err)
+	if err := c.Start(); err != nil {
+		return nil, fmt.Errorf("term: spawn %s: %w", cmd, err)
 	}
 	_ = pty.Slave.Close()
 	pty.Slave = nil
-	return cmd, nil
+	return c, nil
 }

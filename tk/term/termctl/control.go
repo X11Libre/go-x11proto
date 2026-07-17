@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // controller is the common surface for external control of a TermHandle. Two
@@ -93,6 +94,8 @@ func (c *fifoCtrl) open() error {
 	if err := ensureDir(dirOf(c.path)); err != nil {
 		return err
 	}
+	// Remove stale pipe if it exists (from a crashed process)
+	_ = os.Remove(c.path)
 	if err := mkfifo(c.path); err != nil && !os.IsExist(err) {
 		return err
 	}
@@ -119,13 +122,24 @@ func (c *fifoCtrl) readLoop() {
 }
 
 func (c *fifoCtrl) write(cmd string) error {
-	f, err := os.OpenFile(c.path, os.O_WRONLY, 0)
-	if err != nil {
+	// Use a timeout to avoid blocking forever on a stale pipe with no reader.
+	done := make(chan error, 1)
+	go func() {
+		f, err := os.OpenFile(c.path, os.O_WRONLY, 0)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer f.Close()
+		_, err = fmt.Fprintln(f, cmd)
+		done <- err
+	}()
+	select {
+	case err := <-done:
 		return err
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("termctl: write timeout (no reader on pipe %s)", c.path)
 	}
-	defer f.Close()
-	_, err = fmt.Fprintln(f, cmd)
-	return err
 }
 
 // reply is a no-op for FIFO mode: writing a response back into the same FIFO
