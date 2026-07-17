@@ -839,6 +839,12 @@ func (t *Term) Draw() error {
 	if t.gc == nil {
 		return nil
 	}
+	if t.grid == nil {
+		return nil
+	}
+	if t.Conn == nil || t.Conn.X11Conn == nil {
+		return nil
+	}
 	if err := t.ensureGCBackBuffer(); err != nil {
 		return err
 	}
@@ -994,6 +1000,15 @@ func sameStyle(a, b Cell) bool {
 // actually have glyphs beyond Latin-1, so there's no need to approximate.
 func (t *Term) drawAA() error {
 	if t.aaPic == nil {
+		return nil
+	}
+	if t.grid == nil {
+		return nil
+	}
+	// After a detach (or before (re)attach completes) t.Conn / t.AARender are
+	// nil; a queued redraw must not dereference them. Bail — the next attach
+	// redraws anyway.
+	if t.Conn == nil || t.Conn.X11Conn == nil || t.AARender == nil {
 		return nil
 	}
 	if err := t.ensureAABackBuffer(); err != nil {

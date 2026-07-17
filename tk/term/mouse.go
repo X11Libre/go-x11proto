@@ -93,10 +93,15 @@ func encodeMouse(button, col, row int, press, motion, shift, alt, ctrl, sgr bool
 // clamped to the current grid bounds.
 func (t *Term) cellAt(x, y base.CARD16) (row, col int) {
 	var cw, h int
-	if t.AAFace != nil {
+	switch {
+	case t.AAFace != nil:
 		cw, h = t.AAFace.Advance(' '), t.AAFace.Height()
-	} else {
+	case t.Font != nil:
 		cw, h = t.Font.RuneWidth(' '), t.Font.Height()
+	default:
+		// No font metrics yet (window attached before InitTerm ran): report
+		// the origin rather than dereferencing a nil font.
+		return 0, 0
 	}
 	col, row = int(x)/cw, int(y)/h
 	if col < 0 {
