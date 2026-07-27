@@ -2,6 +2,7 @@ package termctl
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -69,6 +70,68 @@ func (h *TermHandle) dispatchCtrl(line string) {
 			h.ctrl.reply("attached")
 		} else {
 			h.ctrl.reply("detached")
+		}
+	case "dump":
+		lines := h.ScreenDump()
+		for _, line := range lines {
+			h.ctrl.reply("%s", line)
+		}
+	case "dump-json":
+		lines := h.ScreenDump()
+		var sb strings.Builder
+		sb.WriteString("[")
+		for i, line := range lines {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			// Escape the line for JSON
+			escaped := strings.ReplaceAll(line, `\`, `\\`)
+			escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+			sb.WriteString(`"`)
+			sb.WriteString(escaped)
+			sb.WriteString(`"`)
+		}
+		sb.WriteString("]")
+		h.ctrl.reply("%s", sb.String())
+	case "dump-to":
+		// dump-to <path> writes screen content to a file as JSON
+		if arg == "" {
+			h.ctrl.reply("error: dump-to requires a file path")
+		} else {
+			lines := h.ScreenDump()
+			data, err := json.Marshal(lines)
+			if err != nil {
+				h.ctrl.reply("error: marshal: %v", err)
+			} else {
+				if err := os.WriteFile(arg, data, 0644); err != nil {
+					h.ctrl.reply("error: write file: %v", err)
+				} else {
+					h.ctrl.reply("ok")
+				}
+			}
+		}
+	case "dump-scrollback":
+		// dump-scrollback <n> <path> writes n scrollback lines to a file as JSON
+		fields := strings.Fields(arg)
+		if len(fields) < 2 {
+			h.ctrl.reply("error: dump-scrollback requires <n> <path>")
+		} else {
+			n := 100
+			if _, err := fmt.Sscanf(fields[0], "%d", &n); err != nil {
+				h.ctrl.reply("error: invalid count: %v", err)
+			} else {
+				lines := h.ScreenDumpScrollback(n)
+				data, err := json.Marshal(lines)
+				if err != nil {
+					h.ctrl.reply("error: marshal: %v", err)
+				} else {
+					if err := os.WriteFile(fields[1], data, 0644); err != nil {
+						h.ctrl.reply("error: write file: %v", err)
+					} else {
+						h.ctrl.reply("ok")
+					}
+				}
+			}
 		}
 	case "quit":
 		_ = h.Close()
