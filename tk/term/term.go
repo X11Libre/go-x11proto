@@ -1427,3 +1427,28 @@ func (t *Term) handleKey(e *events.KeyPressEvent) {
 		t.ScrollTo(0)
 	}
 }
+
+// ScreenDump returns the current visible screen content as plain text lines.
+// This is safe to call while detached — the grid is always live even without
+// an X window. The returned slice has one string per terminal row, right-trimmed
+// of trailing blanks.
+func (t *Term) ScreenDump() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.grid.DumpText()
+}
+
+// ScreenDumpScrollback returns the n most recent scrollback lines as plain text,
+// oldest first. Returns nil if n <= 0 or no scrollback is available.
+func (t *Term) ScreenDumpScrollback(n int) []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.grid.DumpScrollback(n)
+}
+
+// ScreenDimensions returns the terminal's row and column count.
+func (t *Term) ScreenDimensions() (rows, cols int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.grid.Rows, t.grid.Cols
+}

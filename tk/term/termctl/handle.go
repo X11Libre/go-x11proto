@@ -132,6 +132,40 @@ func (h *TermHandle) IsAttached() bool {
 	return h.attached
 }
 
+// ScreenDump returns the current visible screen content as plain text lines.
+// This is safe to call while detached — the grid is always live even without
+// an X window. The returned slice has one string per terminal row, right-trimmed
+// of trailing blanks.
+func (h *TermHandle) ScreenDump() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.t == nil {
+		return nil
+	}
+	return h.t.ScreenDump()
+}
+
+// ScreenDumpScrollback returns the n most recent scrollback lines as plain text,
+// oldest first. Returns nil if n <= 0 or no scrollback is available.
+func (h *TermHandle) ScreenDumpScrollback(n int) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.t == nil {
+		return nil
+	}
+	return h.t.ScreenDumpScrollback(n)
+}
+
+// ScreenDimensions returns the terminal's row and column count.
+func (h *TermHandle) ScreenDimensions() (rows, cols int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.t == nil {
+		return 0, 0
+	}
+	return h.t.ScreenDimensions()
+}
+
 // stopRunLoop asks the current X event-loop goroutine to exit and waits until
 // it has done so. It is a no-op if no loop is running (runLoopWait already
 // closed). Safe to call multiple times.

@@ -1,5 +1,7 @@
 package term
 
+import "strings"
+
 // Attr is a bitmask of SGR text attributes (colour is carried separately in
 // Cell.Fg/Bg).
 type Attr uint16
@@ -281,6 +283,51 @@ func (g *Grid) ExitAltScreen() {
 
 // OnAltScreen reports whether the alternate screen is currently active.
 func (g *Grid) OnAltScreen() bool { return g.onAlt }
+
+// DumpText returns the current visible screen content as plain text, one line
+// per row, each right-trimmed of trailing blank cells. This is the screen
+// dump used by the termctl 'dump' command and the web console's terminal view.
+func (g *Grid) DumpText() []string {
+	lines := make([]string, 0, g.Rows)
+	for r := 0; r < g.Rows; r++ {
+		row := g.cur[r]
+		var sb strings.Builder
+		for c := 0; c < g.Cols; c++ {
+			rn := row[c].Rune
+			if rn == 0 {
+				rn = ' '
+			}
+			sb.WriteRune(rn)
+		}
+		lines = append(lines, strings.TrimRight(sb.String(), " "))
+	}
+	return lines
+}
+
+// DumpScrollback returns the n most recent scrollback lines as plain text,
+// oldest first. Returns nil if n <= 0 or no scrollback is available.
+func (g *Grid) DumpScrollback(n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	sbLines := g.ScrollbackLines(n)
+	if len(sbLines) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(sbLines))
+	for _, row := range sbLines {
+		var sb strings.Builder
+		for c := 0; c < len(row); c++ {
+			rn := row[c].Rune
+			if rn == 0 {
+				rn = ' '
+			}
+			sb.WriteRune(rn)
+		}
+		lines = append(lines, strings.TrimRight(sb.String(), " "))
+	}
+	return lines
+}
 
 // Resize changes the grid's dimensions in place, truncating or padding rows
 // and columns with blanks, and clamping the cursor and scroll region to fit —
