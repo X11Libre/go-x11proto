@@ -85,3 +85,10 @@ func (r *Remote) send(cmd string) error {
 		return fmt.Errorf("termctl: Remote send timeout (no reader on pipe %s)", r.pipe)
 	}
 }
+
+// Send sends a raw command string to the remote terminal's control pipe.
+// This is a lower-level method than Attach/Detach/Stop, allowing callers
+// to send arbitrary commands (e.g., "dump-to /path/to/file").
+func (r *Remote) Send(cmd string) error {
+	return r.send(cmd)
+}
