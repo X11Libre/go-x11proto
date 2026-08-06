@@ -185,7 +185,11 @@ func (t *Term) Init() error {
 		t.cols, t.rows = t.cellSize()
 		t.grid = NewGrid(t.rows, t.cols)
 		t.grid.DefaultFg, t.grid.DefaultBg = Color{}, Color{}
-		if !t.Type.Scrollback {
+		// Same ScrollbackCap semantics as InitTerm: explicit > 0 overrides,
+		// < 0 (or no scrollback type) disables, 0 = default (10000).
+		if t.ScrollbackCap > 0 {
+			t.grid.scrollbackCap = t.ScrollbackCap
+		} else if t.ScrollbackCap < 0 || !t.Type.Scrollback {
 			t.grid.scrollbackCap = 0
 		}
 		t.parser = NewParser(t.grid, t.Type)

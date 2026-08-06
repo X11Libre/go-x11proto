@@ -17,8 +17,8 @@ func (h *TermHandle) startShell() error {
 		BgRGB:          [3]byte{0x00, 0x00, 0x00},
 		OnTitle:        func(string) {},
 		OnExit:         h.onShellExit,
-		Rows:           int(h.geom.H),
-		Cols:           int(h.geom.W),
+		Rows:           h.rows,
+		Cols:           h.cols,
 		ScrollbackCap:  h.scrollbackCap,
 	}
 	if err := t.InitTerm(); err != nil {
