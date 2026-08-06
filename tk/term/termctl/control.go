@@ -136,6 +136,23 @@ func (h *TermHandle) dispatchCtrl(line string) {
 	case "quit":
 		_ = h.Close()
 		h.ctrl.reply("bye")
+	case "dimensions":
+		// dimensions <path> writes dimensions to a file as JSON
+		if arg == "" {
+			h.ctrl.reply("error: dimensions requires a file path")
+		} else {
+			rows, cols := h.ScreenDimensions()
+			data, err := json.Marshal(map[string]int{"rows": rows, "cols": cols})
+			if err != nil {
+				h.ctrl.reply("error: marshal: %v", err)
+			} else {
+				if err := os.WriteFile(arg, data, 0644); err != nil {
+					h.ctrl.reply("error: write file: %v", err)
+				} else {
+					h.ctrl.reply("ok")
+				}
+			}
+		}
 	default:
 		h.ctrl.reply("error: unknown command %q", cmd)
 	}

@@ -78,6 +78,13 @@ type Term struct {
 	// an embedding program can log or forward it.
 	OnMark func(text string)
 
+	// Rows/Cols set the terminal grid size when known before InitTerm.
+	// If both are zero, cellSize() computes them from pixel geometry.
+	Rows, Cols int
+	// ScrollbackCap sets the scrollback buffer capacity in lines.
+	// If zero, the default (10000) is used. If negative, scrollback is disabled.
+	ScrollbackCap int
+
 	// oscPriPending / oscCBPending are the per-selection FIFOs of OSC 52
 	// selection names (e.g. "p"/"c") whose contents an application has
 	// requested via OSC 52 ; sel ; ?. As each request's SelectionNotify
@@ -464,10 +471,18 @@ func (t *Term) InitTerm() error {
 	if t.grid != nil {
 		return nil
 	}
-	t.cols, t.rows = t.cellSize()
+	// Use explicit Rows/Cols if set, otherwise compute from geometry
+	if t.Rows > 0 && t.Cols > 0 {
+		t.rows, t.cols = t.Rows, t.Cols
+	} else {
+		t.cols, t.rows = t.cellSize()
+	}
 	t.grid = NewGrid(t.rows, t.cols)
 	t.grid.DefaultFg, t.grid.DefaultBg = Color{}, Color{}
-	if !t.Type.Scrollback {
+	// ScrollbackCap: explicit > 0 overrides, < 0 disables, 0 = default (10000)
+	if t.ScrollbackCap > 0 {
+		t.grid.scrollbackCap = t.ScrollbackCap
+	} else if t.ScrollbackCap < 0 || !t.Type.Scrollback {
 		t.grid.scrollbackCap = 0
 	}
 	t.parser = NewParser(t.grid, t.Type)
