@@ -45,6 +45,26 @@ func WithGeometry(g Geometry) Opt {
 	return func(h *TermHandle) { h.geom = g }
 }
 
+// WithRows sets the terminal grid rows (default 60).
+func WithRows(rows int) Opt {
+	return func(h *TermHandle) { h.geom.H = uint16(rows) }
+}
+
+// WithCols sets the terminal grid columns (default 120).
+func WithCols(cols int) Opt {
+	return func(h *TermHandle) { h.geom.W = uint16(cols) }
+}
+
+// WithScrollbackCap sets the scrollback capacity in lines (default 10000).
+// This only affects the primary screen's scrollback buffer.
+func WithScrollbackCap(cap int) Opt {
+	return func(h *TermHandle) { h.scrollbackCap = cap }
+}
+
+type termctlOpts struct {
+	scrollbackCap int
+}
+
 // WithOnExit registers a cleanup callback invoked once, after the shell has
 // exited and before Close returns. Use it to remove pipes, status files, etc.
 func WithOnExit(fn func()) Opt {
