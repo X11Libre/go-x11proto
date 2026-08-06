@@ -140,3 +140,51 @@ func TestScrollToClampsToAvailableHistory(t *testing.T) {
 		t.Errorf("ScrollBy(-100) from max: offset = %d, want 0 (clamped)", term.scrollOffset)
 	}
 }
+
+func TestInitTermExplicitRowsCols(t *testing.T) {
+	// InitTerm (detached, no X window) must honor explicit Rows/Cols instead
+	// of deriving them from pixel geometry.
+	term := &Term{Type: XTerm256Color, Rows: 24, Cols: 80}
+	if err := term.InitTerm(); err != nil {
+		t.Fatalf("InitTerm: %v", err)
+	}
+	if term.grid.Rows != 24 || term.grid.Cols != 80 {
+		t.Errorf("grid = %dx%d, want 24x80 (explicit Rows/Cols)", term.grid.Rows, term.grid.Cols)
+	}
+	if r, c := term.ScreenDimensions(); r != 24 || c != 80 {
+		t.Errorf("ScreenDimensions = %dx%d, want 24x80", r, c)
+	}
+}
+
+func TestInitTermDefaultsToCellSize(t *testing.T) {
+	// Without explicit Rows/Cols and without any font, cellSize() falls back
+	// to the 80x24 default — the previous behaviour, unchanged.
+	term := &Term{Type: XTerm256Color}
+	if err := term.InitTerm(); err != nil {
+		t.Fatalf("InitTerm: %v", err)
+	}
+	if term.grid.Rows != 24 || term.grid.Cols != 80 {
+		t.Errorf("grid = %dx%d, want 24x80 (default cellSize)", term.grid.Rows, term.grid.Cols)
+	}
+}
+
+func TestInitTermScrollbackCapSemantics(t *testing.T) {
+	cases := []struct {
+		name     string
+		cap      int
+		wantCap  int
+	}{
+		{"default (0)", 0, defaultScrollbackCap},
+		{"explicit", 500, 500},
+		{"disabled (negative)", -1, 0},
+	}
+	for _, c := range cases {
+		term := &Term{Type: XTerm256Color, ScrollbackCap: c.cap}
+		if err := term.InitTerm(); err != nil {
+			t.Fatalf("%s: InitTerm: %v", c.name, err)
+		}
+		if term.grid.scrollbackCap != c.wantCap {
+			t.Errorf("%s: scrollbackCap = %d, want %d", c.name, term.grid.scrollbackCap, c.wantCap)
+		}
+	}
+}

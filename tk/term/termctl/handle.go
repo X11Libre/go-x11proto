@@ -51,13 +51,15 @@ type TermHandle struct {
 	runLoopWait chan struct{}
 
 	// configuration
-	shell     string
-	shellArgs []string
-	extraEnv  []string
-	title     string
-	ttfPath   string
-	geom      Geometry
-	onExit    func()
+	shell         string
+	shellArgs     []string
+	extraEnv      []string
+	title         string
+	ttfPath       string
+	geom          Geometry
+	onExit        func()
+	scrollbackCap int
+	rows, cols    int // explicit grid size in character cells; 0 = derive from geometry
 
 	// shellExited is set by onShellExit (term.Start's wait goroutine).
 	shellExited bool
@@ -86,13 +88,14 @@ type xconn struct {
 // for and clean up after the shell.
 func New(opts ...Opt) (*TermHandle, error) {
 	h := &TermHandle{
-		id:   newID(),
-		name: "",
-		title: DefaultTitle,
-		ttfPath: DefaultTTFPath,
-		geom:   Geometry{W: 800, H: 480, X: 50, Y: 50},
-		runLoopStop: make(chan struct{}),
-		runLoopWait: make(chan struct{}),
+		id:            newID(),
+		name:          "",
+		title:         DefaultTitle,
+		ttfPath:       DefaultTTFPath,
+		geom:          Geometry{W: 800, H: 480, X: 50, Y: 50},
+		scrollbackCap: 10000,
+		runLoopStop:   make(chan struct{}),
+		runLoopWait:   make(chan struct{}),
 	}
 	for _, o := range opts {
 		o(h)
