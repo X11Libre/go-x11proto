@@ -245,6 +245,14 @@ func (t *Term) initX() error {
 			return
 		}
 		t.oscClipMu.Unlock()
+		if s == "" && t.clip != nil {
+			// Empty PRIMARY (no mouse selection; the copied text lives in
+			// CLIPBOARD, e.g. a browser Ctrl+C): fall back to CLIPBOARD, as
+			// modern terminals do. Runs off the event-loop goroutine so the
+			// reply wait can't stall repaints.
+			go func() { _, _ = t.clip.RequestText() }()
+			return
+		}
 		t.Paste(s)
 	}
 
@@ -264,8 +272,8 @@ func (t *Term) initX() error {
 				log.Printf("term: recovered from CLIPBOARD OnPaste panic: %v", r)
 			}
 		}()
-		// Only OSC 52 CLIPBOARD queries are answered here; the terminal has
-		// no other use for inbound CLIPBOARD pastes.
+		// An OSC 52 ; sel ; ? query in flight takes priority: its answer is
+		// the selection text written back to the PTY, not pasted as keystrokes.
 		t.oscClipMu.Lock()
 		if n := len(t.oscCBPending); n > 0 {
 			sel := t.oscCBPending[0]
@@ -275,6 +283,10 @@ func (t *Term) initX() error {
 			return
 		}
 		t.oscClipMu.Unlock()
+		// No OSC 52 query pending: this is an ordinary CLIPBOARD paste
+		// (Ctrl+V / Ctrl+Shift+V / Shift+Insert, see pasteClipboard), write
+		// it to the PTY like the PRIMARY OnPaste does.
+		t.Paste(s)
 	}
 	t.Conn.X11Conn.RegisterWindowHandler(clipCBWin, clip)
 	t.Conn.X11Conn.RegisterWindowHandler(clipWin, primary)
@@ -1415,6 +1427,19 @@ func (t *Term) handleKey(e *events.KeyPressEvent) {
 			return
 		}
 	}
+	// Paste shortcuts: Ctrl+V / Ctrl+Shift+V and Shift+Insert paste the X
+	// CLIPBOARD selection (the GUI paste convention). Intercept before
+	// EncodeKey, which would otherwise turn Ctrl+V into its control byte
+	// (0x16, SYN) and swallow Shift+Insert (no encoding). Middle-click
+	// pastes PRIMARY instead — see handleButtonPress.
+	if k.Ctrl && (k.Rune == 'v' || k.Rune == 'V') {
+		t.pasteClipboard()
+		return
+	}
+	if k.Key == keyboard.KeyInsert && k.Shift {
+		t.pasteClipboard()
+		return
+	}
 	t.mu.Lock()
 	appCursor := t.parser.Modes.AppCursor
 	t.mu.Unlock()
@@ -1426,6 +1451,18 @@ func (t *Term) handleKey(e *events.KeyPressEvent) {
 		// happen off-screen, above the current (stale) view.
 		t.ScrollTo(0)
 	}
+}
+
+// pasteClipboard requests the X CLIPBOARD selection and, when its text
+// arrives (via clip.OnPaste on the event loop), writes it to the PTY. It is
+// the keyboard counterpart of the middle-click PRIMARY paste in
+// handleButtonPress, and like that one runs off the event-loop goroutine so
+// a slow or never-answered selection reply can't block repaints.
+func (t *Term) pasteClipboard() {
+	if t.clip == nil {
+		return
+	}
+	go func() { _, _ = t.clip.RequestText() }()
 }
 
 // ScreenDump returns the current visible screen content as plain text lines.

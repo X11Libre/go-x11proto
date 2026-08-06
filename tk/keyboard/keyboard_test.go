@@ -121,6 +121,7 @@ func TestLookupSpecialKeys(t *testing.T) {
 		114: {xkRight},
 		110: {xkHome},
 		115: {xkEnd},
+		106: {xkInsert},
 		67:  {xkF1},
 		76:  {xkF12},
 	}
@@ -128,7 +129,7 @@ func TestLookupSpecialKeys(t *testing.T) {
 	want := map[base.CARD8]Key{
 		36: KeyEnter, 22: KeyBackspace, 119: KeyDelete,
 		113: KeyLeft, 114: KeyRight, 110: KeyHome, 115: KeyEnd,
-		67: KeyF1, 76: KeyF12,
+		106: KeyInsert, 67: KeyF1, 76: KeyF12,
 	}
 	for kc, k := range want {
 		ev := m.Lookup(kc, 0)
@@ -155,5 +156,30 @@ func TestPrintableWithModifiers(t *testing.T) {
 	}
 	if ev := m.Lookup(kcA, maskControl); !ev.Ctrl || ev.Keysym != 0x61 {
 		t.Errorf("Ctrl+a: Ctrl=%v keysym=%#x, want Ctrl=true keysym=0x61", ev.Ctrl, ev.Keysym)
+	}
+}
+
+func TestLookupPasteShortcuts(t *testing.T) {
+	// The keyboard-paste detection in tk/term handleKey relies on these
+	// exact lookup results: Ctrl+V must surface as rune 'v' with Ctrl set
+	// (so it can be intercepted before EncodeKey turns it into 0x16), and
+	// Shift+Insert must surface as KeyInsert with Shift set (so it can be
+	// intercepted before EncodeKey swallows it).
+	const kcV = base.CARD8(55)
+	m := synthMap(t, 2, map[base.CARD8][]uint32{
+		kcV: {0x76, 0x56}, // 'v' / 'V'
+		106: {xkInsert},
+	})
+	ev := m.Lookup(kcV, maskControl)
+	if ev.Rune != 'v' || !ev.Ctrl {
+		t.Errorf("Ctrl+V: rune=%q Ctrl=%v, want rune 'v' Ctrl=true", ev.Rune, ev.Ctrl)
+	}
+	ev = m.Lookup(kcV, maskControl|maskShift)
+	if ev.Rune != 'V' || !ev.Ctrl || !ev.Shift {
+		t.Errorf("Ctrl+Shift+V: rune=%q Ctrl=%v Shift=%v, want rune 'V' Ctrl+Shift=true", ev.Rune, ev.Ctrl, ev.Shift)
+	}
+	ev = m.Lookup(106, maskShift)
+	if ev.Key != KeyInsert || !ev.Shift {
+		t.Errorf("Shift+Insert: Key=%v Shift=%v, want KeyInsert Shift=true", ev.Key, ev.Shift)
 	}
 }

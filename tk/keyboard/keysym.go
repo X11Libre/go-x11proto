@@ -19,6 +19,7 @@ const (
 	xkPageUp    = 0xff55
 	xkPageDown  = 0xff56
 	xkEnd       = 0xff57
+	xkInsert    = 0xff63
 	xkKPEnter   = 0xff8d
 	xkDelete    = 0xffff
 
@@ -47,6 +48,7 @@ const (
 	KeyEnd
 	KeyPageUp
 	KeyPageDown
+	KeyInsert
 	KeyF1
 	KeyF2
 	KeyF3
@@ -91,6 +93,8 @@ func specialKey(ks uint32) Key {
 		return KeyPageUp
 	case xkPageDown:
 		return KeyPageDown
+	case xkInsert:
+		return KeyInsert
 	}
 	if ks >= xkF1 && ks <= xkF12 {
 		return KeyF1 + Key(ks-xkF1)
