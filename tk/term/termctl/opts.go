@@ -45,6 +45,26 @@ func WithGeometry(g Geometry) Opt {
 	return func(h *TermHandle) { h.geom = g }
 }
 
+// WithRows sets the terminal grid rows in character cells. This is the grid
+// size used while detached (before any window exists); once a window is
+// attached, the actual size is derived from the window geometry. 0 = derive
+// from geometry (or the window). These are the character-cell dimensions, NOT
+// the window pixel size — for that use WithGeometry.
+func WithRows(rows int) Opt {
+	return func(h *TermHandle) { h.rows = rows }
+}
+
+// WithCols sets the terminal grid columns in character cells. See WithRows.
+func WithCols(cols int) Opt {
+	return func(h *TermHandle) { h.cols = cols }
+}
+
+// WithScrollbackCap sets the scrollback capacity in lines (default 10000).
+// This only affects the primary screen's scrollback buffer.
+func WithScrollbackCap(cap int) Opt {
+	return func(h *TermHandle) { h.scrollbackCap = cap }
+}
+
 // WithOnExit registers a cleanup callback invoked once, after the shell has
 // exited and before Close returns. Use it to remove pipes, status files, etc.
 func WithOnExit(fn func()) Opt {

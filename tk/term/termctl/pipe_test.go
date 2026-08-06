@@ -51,3 +51,37 @@ func TestPipeStopHeadless(t *testing.T) {
 		t.Fatal("Run did not return after stop command")
 	}
 }
+
+// TestDimensionsOpts exercises the WithRows/WithCols options end to end
+// without an X connection: the grid must be sized from the explicit character
+// dimensions, NOT from the (pixel) window geometry — the exact bug the old
+// WithRows/WithCols implementation had (it wrote into h.geom, which would have
+// produced a 480-row grid from the default geometry H=480).
+func TestDimensionsOpts(t *testing.T) {
+	h, err := New(WithName("dims-"+t.Name()), WithShell("/bin/sh"), WithRows(12), WithCols(40))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer h.Close()
+
+	rows, cols := h.ScreenDimensions()
+	if rows != 12 || cols != 40 {
+		t.Errorf("ScreenDimensions = %dx%d, want 12x40 (explicit Rows/Cols)", rows, cols)
+	}
+}
+
+// TestDefaultDimensionsOpts checks that, without WithRows/WithCols, the grid
+// still falls back to the cellSize default (80x24, no font/no window) rather
+// than deriving from the window pixel geometry.
+func TestDefaultDimensionsOpts(t *testing.T) {
+	h, err := New(WithName("dimsdef-"+t.Name()), WithShell("/bin/sh"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer h.Close()
+
+	rows, cols := h.ScreenDimensions()
+	if rows != 24 || cols != 80 {
+		t.Errorf("ScreenDimensions = %dx%d, want default 24x80", rows, cols)
+	}
+}
