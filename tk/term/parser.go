@@ -80,14 +80,14 @@ type Parser struct {
 
 	// charsetSlot remembers which of G0-G3 (the byte after ESC: '(' ')' '*'
 	// '+') is being designated, so stCharset's next byte can be interpreted
-	// correctly. altCharset tracks whether G0 is currently designated as DEC
-	// Special Graphics (ESC ( 0) rather than the default ASCII (ESC ( B) —
-	// the common way ncurses/xterm terminfo entries draw box borders. Only
-	// G0 is tracked: SI/SO (switching which of G0-G3 is active) isn't
-	// implemented, since real terminfo entries almost always designate G0
-	// itself rather than shifting between slots.
-	charsetSlot byte
-	altCharset  bool
+	// correctly.
+	// charsets[0..3] hold the designated charset for G0..G3:
+	// 0 = ASCII (default), 1 = DEC Special Graphics, 255 = user-preferred (ignored).
+	// activeCharset tracks which of G0-G3 is currently active (0=G0, 1=G1, 2=G2, 3=G3).
+	// Initially G0 is active; SO (0x0E) switches to G1, SI (0x0F) switches back to G0.
+	charsetSlot    byte
+	charsets       [4]byte
+	activeCharset  byte
 }
 
 type pstate int
@@ -102,9 +102,16 @@ const (
 )
 
 // NewParser returns a Parser bound to g, gated by profile t. AutoWrap starts
-// on, matching every real terminal's default.
+// on, matching every real terminal's default. G0 starts as ASCII (0), G1-G3
+// are uninitialized (255) until explicitly designated.
 func NewParser(g *Grid, t Type) *Parser {
-	return &Parser{Grid: g, Type: t, Modes: ModeState{AutoWrap: true}}
+	p := &Parser{Grid: g, Type: t, Modes: ModeState{AutoWrap: true}}
+	p.charsets[0] = 0 // G0 = ASCII by default
+	p.charsets[1] = 255
+	p.charsets[2] = 255
+	p.charsets[3] = 255
+	p.activeCharset = 0 // G0 active
+	return p
 }
 
 // Feed decodes data, applying every control sequence and printable character
@@ -133,8 +140,27 @@ func (p *Parser) step(b byte) {
 			p.awaitingST = true
 		}
 	case stCharset:
-		if p.charsetSlot == '(' { // only G0 is tracked, see altCharset's doc comment
-			p.altCharset = b == '0'
+		// Map charsetSlot to index: '('=0 (G0), ')'=1 (G1), '*'=2 (G2), '+'=3 (G3)
+		var idx byte
+		switch p.charsetSlot {
+		case '(':
+			idx = 0
+		case ')':
+			idx = 1
+		case '*':
+			idx = 2
+		case '+':
+			idx = 3
+		}
+		if idx < 4 {
+			// Designation: '0' = DEC Special Graphics, 'B' = ASCII, others = user-preferred (ignored)
+			if b == '0' {
+				p.charsets[idx] = 1 // DEC Special Graphics
+			} else if b == 'B' || b == 'A' {
+				p.charsets[idx] = 0 // ASCII (B) or UK (A) — treat as ASCII
+			} else {
+				p.charsets[idx] = 255 // user-preferred / other — ignore
+			}
 		}
 		p.state = stGround
 	}
@@ -147,7 +173,8 @@ func (p *Parser) ground(b byte) {
 	case b < 0x20 || b == 0x7f:
 		p.c0(b)
 	case b < 0x80:
-		if p.altCharset {
+		// Use the active charset (G0 by default, G1 after SO, etc.)
+		if p.charsets[p.activeCharset] == 1 { // DEC Special Graphics
 			if r, ok := decSpecialGraphics(b); ok {
 				p.putRune(r)
 				return
@@ -260,6 +287,10 @@ func (p *Parser) c0(b byte) {
 		g.newline()
 	case '\r':
 		g.CursorCol = 0
+	case 0x0e: // SO (Shift Out): switch to G1 charset
+		p.activeCharset = 1
+	case 0x0f: // SI (Shift In): switch back to G0 charset
+		p.activeCharset = 0
 	}
 }
 
@@ -322,7 +353,12 @@ func (p *Parser) reset() {
 	*p.Grid = *NewGrid(p.Grid.Rows, p.Grid.Cols)
 	p.Modes = ModeState{AutoWrap: true}
 	p.curFg, p.curBg, p.curAttr = Color{}, Color{}, 0
-	p.altCharset, p.charsetSlot = false, 0
+	p.charsetSlot = 0
+	p.charsets[0] = 0 // G0 = ASCII by default
+	p.charsets[1] = 255
+	p.charsets[2] = 255
+	p.charsets[3] = 255
+	p.activeCharset = 0
 	p.state = stGround
 }
 

@@ -16,6 +16,19 @@ func EncodeKey(e keyboard.Event, appCursor bool) []byte {
 			return []byte{b}
 		}
 	}
+	// Alt (Meta) sends ESC prefix followed by the key's normal encoding.
+	// This matches xterm's metaSendsEscape resource behavior.
+	if e.Alt {
+		base := EncodeKey(keyboard.Event{Key: e.Key, Rune: e.Rune, Shift: e.Shift, Ctrl: e.Ctrl}, appCursor)
+		if base != nil {
+			return append([]byte{0x1b}, base...)
+		}
+		// For printable runes with Alt, send ESC + rune
+		if e.Printable() {
+			return []byte{0x1b, byte(e.Rune)}
+		}
+		return nil
+	}
 	switch e.Key {
 	case keyboard.KeyEnter:
 		return []byte{'\r'}

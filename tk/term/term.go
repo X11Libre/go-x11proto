@@ -210,7 +210,8 @@ func (t *Term) initX() error {
 	t.resolver = newPixelResolver(t.Conn.X11Conn)
 
 	t.EventMask |= base.CARD32(event_mask.KeyPress | event_mask.KeyRelease | event_mask.Exposure | event_mask.StructureNotify |
-		event_mask.ButtonPress | event_mask.ButtonRelease | event_mask.ButtonMotion | event_mask.FocusChange | event_mask.VisibilityChange)
+		event_mask.ButtonPress | event_mask.ButtonRelease | event_mask.ButtonMotion | event_mask.FocusChange | event_mask.VisibilityChange |
+		event_mask.EnterWindow | event_mask.LeaveWindow)
 	t.Window.SetWindowHandler(t)
 	if err := t.Window.Create(); err != nil {
 		return err
@@ -504,6 +505,14 @@ func (t *Term) InitTerm() error {
 // code paths configure the same behaviour.
 func (t *Term) wireOSC() {
 	t.parser.SetTitle = func(s string) {
+		// Update the X11 window title (WM_NAME) so window managers and
+		// taskbars show the current title. This matches xterm's behavior
+		// where OSC 0/1/2 all set the window title.
+		// Guard against nil connection (e.g. during early startup before X11
+		// resources are fully initialized).
+		if t.Window.Conn != nil && t.Window.Conn.X11Conn != nil && !t.Window.XID.Invalid() {
+			_ = t.Window.SetName(s)
+		}
 		if t.OnTitle != nil {
 			t.OnTitle(s)
 		}
@@ -1396,8 +1405,42 @@ func (t *Term) HandleWindowEvent(ev events.Event) bool {
 		t.handleButtonRelease(e)
 	case *events.MotionEvent:
 		t.handleMotion(e)
+	case *events.EnterEvent:
+		t.handleEnter(e)
+	case *events.LeaveEvent:
+		t.handleLeave(e)
 	}
 	return true
+}
+
+// handleEnter reports pointer enter events to the application if mouse
+// tracking mode 1000, 1002, or 1003 is active (same as xterm).
+func (t *Term) handleEnter(e *events.EnterEvent) {
+	if mode := t.mouseReportMode(); mode != 0 && t.pty != nil {
+		t.mu.Lock()
+		sgr := t.parser.Modes.MouseSGR
+		t.mu.Unlock()
+		// Encode as a button press with button=32 (enter) per xterm convention
+		row, col := t.cellAt(e.EventX, e.EventY)
+		b := encodeMouse(32, col+1, row+1, true, false,
+			e.State&modShift != 0, e.State&modAlt != 0, e.State&modControl != 0, sgr)
+		_, _ = t.pty.Master.Write(b)
+	}
+}
+
+// handleLeave reports pointer leave events to the application if mouse
+// tracking mode 1000, 1002, or 1003 is active (same as xterm).
+func (t *Term) handleLeave(e *events.LeaveEvent) {
+	if mode := t.mouseReportMode(); mode != 0 && t.pty != nil {
+		t.mu.Lock()
+		sgr := t.parser.Modes.MouseSGR
+		t.mu.Unlock()
+		// Encode as a button release with button=32 (leave) per xterm convention
+		row, col := t.cellAt(e.EventX, e.EventY)
+		b := encodeMouse(32, col+1, row+1, false, false,
+			e.State&modShift != 0, e.State&modAlt != 0, e.State&modControl != 0, sgr)
+		_, _ = t.pty.Master.Write(b)
+	}
 }
 
 func (t *Term) handleResize() {
