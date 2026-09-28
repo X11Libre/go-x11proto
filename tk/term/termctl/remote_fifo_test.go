@@ -96,3 +96,37 @@ func TestSendRepeatedlyDoesNotLeakGoroutines(t *testing.T) {
 			grew, rounds, allowed)
 	}
 }
+
+// TestFifoCtrlWriteToPipeWithoutReaderReturnsPromptly covers the second copy of
+// the same defect, in fifoCtrl.write (control.go). It had the identical shape:
+// a goroutine blocked in a blocking O_WRONLY open, wrapped in a select whose
+// two-second timeout only protected the caller. A comment there even claimed
+// the timeout avoided "blocking forever on a stale pipe with no reader", which
+// is exactly what it did not do.
+//
+// This path is what a long-lived termctl server uses to answer its control
+// pipe, so a stale pipe leaks a thread there too.
+func TestFifoCtrlWriteToPipeWithoutReaderReturnsPromptly(t *testing.T) {
+	dir := t.TempDir()
+	pipe := filepath.Join(dir, "ctrl.pipe")
+	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
+		t.Fatalf("Mkfifo: %v", err)
+	}
+
+	c := &fifoCtrl{path: pipe, done: make(chan struct{})}
+
+	start := time.Now()
+	err := c.write("status")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("write to a pipe without a reader must fail")
+	}
+	if !strings.Contains(err.Error(), "no reader") {
+		t.Errorf("error should name the real cause, got: %v", err)
+	}
+	const limit = 500 * time.Millisecond
+	if elapsed > limit {
+		t.Errorf("write blocked for %v, want < %v: the non-blocking open is not in effect", elapsed, limit)
+	}
+}

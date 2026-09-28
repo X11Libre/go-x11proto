@@ -3,9 +3,11 @@ package termctl
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -202,24 +204,26 @@ func (c *fifoCtrl) readLoop() {
 }
 
 func (c *fifoCtrl) write(cmd string) error {
-	// Use a timeout to avoid blocking forever on a stale pipe with no reader.
-	done := make(chan error, 1)
-	go func() {
-		f, err := os.OpenFile(c.path, os.O_WRONLY, 0)
-		if err != nil {
-			done <- err
-			return
+	// O_NONBLOCK, not a timeout. Opening a FIFO for writing blocks until a
+	// reader appears, so the select this used to wrap did not prevent
+	// blocking at all: it bounded the *caller* while the goroutine stayed
+	// parked in open(2) forever, costing one OS thread per call. With
+	// O_NONBLOCK a missing reader fails immediately with ENXIO, which is the
+	// honest answer, and no goroutine is left behind. Same reasoning as
+	// Remote.send; keep the two in step.
+	f, err := os.OpenFile(c.path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ENXIO) {
+			return fmt.Errorf("termctl: write: no reader on pipe %s", c.path)
 		}
-		defer f.Close()
-		_, err = fmt.Fprintln(f, cmd)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(2 * time.Second):
-		return fmt.Errorf("termctl: write timeout (no reader on pipe %s)", c.path)
+		return fmt.Errorf("termctl: write: %w", err)
 	}
+	defer f.Close()
+	_ = f.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	if _, err := fmt.Fprintln(f, cmd); err != nil {
+		return fmt.Errorf("termctl: write: %w", err)
+	}
+	return nil
 }
 
 // reply is a no-op for FIFO mode: writing a response back into the same FIFO
