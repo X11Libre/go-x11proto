@@ -124,7 +124,7 @@ chmod +x "$CLIENT"
 export BUILD_DIR OUT DISP
 
 log "=== launching Xvfb + test client via simple-xinit ==="
-"$SIMPLE_XINIT" "$CLIENT" -- "$XVFB" "$DISP" -screen 0 1024x768x24 2>&1 | tee -a "$OUT"
+"$SIMPLE_XINIT" "$CLIENT" -- "$XVFB" +byteswappedclients "$DISP" -screen 0 1024x768x24 2>&1 | tee -a "$OUT"
 RC=$?
 if [ "$RC" -ne 0 ]; then
     die "simple-xinit exited with rc=$RC"
