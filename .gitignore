@@ -8,3 +8,9 @@
 /terminal-aa
 /terminal-aa-detach
 demo/*/terminal-aa-detach
+
+# demo/tabbed/smoke.sh sets BUILD_DIR="$ROOT/_WORK_/smoke-bin" (line 16)
+# and generates _WORK_/smoke-bin/client.sh with "cat >" (line 54), so every
+# smoke run recreates this directory inside the source tree. Without this
+# entry a "git add -A" would commit ~9MB of build artefacts.
+/_WORK_/
