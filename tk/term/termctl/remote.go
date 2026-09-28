@@ -1,8 +1,10 @@
 package termctl
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"syscall"
 	"time"
 )
 
@@ -66,24 +68,36 @@ func (r *Remote) Status() (string, error) {
 // Pipe returns the control-pipe path this Remote drives.
 func (r *Remote) Pipe() string { return r.pipe }
 
+// send writes a command to the control pipe.
+//
+// The pipe is opened O_WRONLY|O_NONBLOCK on purpose. A blocking open of a
+// FIFO for writing waits for a reader indefinitely, so a pipe whose owning
+// process is gone (a zombie ship: the FIFO file still exists, nobody reads
+// it) would wedge the caller forever. This used to be handled by a
+// goroutine plus a two-second select, which returned an error to the caller
+// but abandoned the goroutine while it was still parked in open(2) — one
+// leaked thread per call, per process, until the process ran out of file
+// descriptors and could no longer accept connections at all. With
+// O_NONBLOCK the open fails immediately with ENXIO when there is no reader,
+// which is the honest answer, and no goroutine is left behind.
+//
+// The write deadline stays as a second line of defence: a reader can open
+// the pipe and then never drain it.
 func (r *Remote) send(cmd string) error {
-	done := make(chan error, 1)
-	go func() {
-		f, err := os.OpenFile(r.pipe, os.O_WRONLY, 0)
-		if err != nil {
-			done <- err
-			return
+	f, err := os.OpenFile(r.pipe, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ENXIO) {
+			return fmt.Errorf("termctl: Remote send: no reader on pipe %s", r.pipe)
 		}
-		defer f.Close()
-		_, err = fmt.Fprintln(f, cmd)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(2 * time.Second):
-		return fmt.Errorf("termctl: Remote send timeout (no reader on pipe %s)", r.pipe)
+		return fmt.Errorf("termctl: Remote send: %w", err)
 	}
+	defer f.Close()
+	_ = f.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	_, err = fmt.Fprintln(f, cmd)
+	if err != nil {
+		return fmt.Errorf("termctl: Remote send: %w", err)
+	}
+	return nil
 }
 
 // Send sends a raw command string to the remote terminal's control pipe.
